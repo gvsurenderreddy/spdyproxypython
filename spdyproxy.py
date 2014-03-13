@@ -55,7 +55,7 @@ class Spdyproxy:
 			port = url.port
 
 		if(method=='CONNECT'):
-			self.handlePlain(conn, addr, request, url, port)
+			self.handleSecure(conn, addr, request, url, port)
 		else:
 			self.handlePlain(conn, addr, request, url, port)
 
@@ -87,15 +87,18 @@ class Spdyproxy:
 		try:
 			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			ssl_sock = ssl.wrap_socket(s,ca_certs="ca_certs_file",cert_reqs=ssl.CERT_REQUIRED)
-			ssl_sock.connect((url.netloc, port))
+			#ssl_sock.connect((url.netloc, port))
+			s.connect(('proxy.unlu.edu.ar', 8080))
+			request = request.replace('CONNECT','GET');
 			ssl_sock.send(request)
+			
 			while 1:
-				data = sssl_sock.recv(self.max_data_recv)
+				data = ssl_sock.recv(self.max_data_recv)
 				if (len(data) > 0):
 					conn.send(data)
 				else:
 					break
-			sssl_sock.close()
+			ssl_sock.close()
 			conn.close()
 		except socket.error, (value, message):
 			if s:
