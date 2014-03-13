@@ -4,6 +4,7 @@ import thread
 import socket
 import ssl
 from urlparse import urlparse
+import pymongo
 
 class Spdyproxy:
 	def __init__(self,port,host='',backlog=50):
@@ -87,8 +88,8 @@ class Spdyproxy:
 		try:
 			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			ssl_sock = ssl.wrap_socket(s,ca_certs="ca_certs_file",cert_reqs=ssl.CERT_REQUIRED)
-			#ssl_sock.connect((url.netloc, port))
-			s.connect(('proxy.unlu.edu.ar', 8080))
+			ssl_sock.connect((url.netloc, port))
+			#s.connect(('proxy.unlu.edu.ar', 8080))
 			request = request.replace('CONNECT','GET');
 			ssl_sock.send(request)
 			
@@ -111,7 +112,11 @@ class Spdyproxy:
 if __name__ == '__main__':
 	try:
 		proxy = Spdyproxy(8080)
-		proxy.startProxy()
+		#proxy.startProxy()
+		client = pymongo.MongoClient('localhost', 27017)
+		db = client.test_database
+		post = {"name": "maxi","text": "My first insert"}
+		db.people.insert(post)
 	except KeyboardInterrupt:
 		print "Ctrl C - Stopping Proxy"
 		sys.exit(1)
