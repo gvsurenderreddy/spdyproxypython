@@ -115,8 +115,10 @@ if __name__ == '__main__':
 		#proxy.startProxy()
 		client = pymongo.MongoClient('localhost', 27017)
 		db = client.test_database
-		post = {"name": "maxi","text": "My first insert"}
-		db.people.insert(post)
+		#post = {"name": "maxi","text": "My first insert"}
+		#db.people.insert(post)
+		people = db.people.find()
+		print people[0]
 	except KeyboardInterrupt:
 		print "Ctrl C - Stopping Proxy"
 		sys.exit(1)
