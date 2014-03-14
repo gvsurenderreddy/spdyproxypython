@@ -4,7 +4,7 @@ import thread
 import socket
 import ssl
 from urlparse import urlparse
-import pymongo
+#import pymongo
 
 class Spdyproxy:
 	def __init__(self,port,host='',backlog=50):
@@ -63,9 +63,9 @@ class Spdyproxy:
 	def handlePlain(self,conn,addr,request,url,port):
 		try:
 			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-			#s.connect((url.netloc, port))
+			s.connect((url.netloc, port))
 			#para usar proxy
-			s.connect(('proxy.unlu.edu.ar', 8080))
+			#s.connect(('proxy.unlu.edu.ar', 8080))
 			s.send(request)
 			while 1:
 				data = s.recv(self.max_data_recv)
@@ -84,22 +84,21 @@ class Spdyproxy:
 			sys.exit(1)
 
 	def handleSecure(self,conn,addr,request,url,port):
-		#send('HTTP/1.1 200 Connection established\n'+'Proxy-agent: spdyProxy 0.1\n\n')
 		try:
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			ssl_sock = ssl.wrap_socket(s,ca_certs="ca_certs_file",cert_reqs=ssl.CERT_REQUIRED)
-			ssl_sock.connect((url.netloc, port))
+			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
+			print url.netloc
+			s.connect((url.netloc, port))
+			conn.send('HTTP/1.1 200 Connection established\n'+'Proxy-agent: spdyProxy 0.1\n\n')
+			#para usar proxy
 			#s.connect(('proxy.unlu.edu.ar', 8080))
-			request = request.replace('CONNECT','GET');
-			ssl_sock.send(request)
-			
+			s.send(request)
 			while 1:
-				data = ssl_sock.recv(self.max_data_recv)
+				data = s.recv(self.max_data_recv)
 				if (len(data) > 0):
 					conn.send(data)
 				else:
 					break
-			ssl_sock.close()
+			s.close()
 			conn.close()
 		except socket.error, (value, message):
 			if s:
@@ -112,13 +111,13 @@ class Spdyproxy:
 if __name__ == '__main__':
 	try:
 		proxy = Spdyproxy(8080)
-		#proxy.startProxy()
-		client = pymongo.MongoClient('localhost', 27017)
-		db = client.test_database
+		proxy.startProxy()
+		#client = pymongo.MongoClient('localhost', 27017)
+		#db = client.test_database
 		#post = {"name": "maxi","text": "My first insert"}
 		#db.people.insert(post)
-		people = db.people.find()
-		print people[0]
+		#people = db.people.find()
+		#print people[0]
 	except KeyboardInterrupt:
 		print "Ctrl C - Stopping Proxy"
 		sys.exit(1)
