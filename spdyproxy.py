@@ -1,123 +1,116 @@
 import os
 import sys
-import thread
+import BaseHTTPServer
+import SocketServer
+import urlparse
 import socket
-import ssl
-from urlparse import urlparse
-#import pymongo
+import select
 
-class Spdyproxy:
-	def __init__(self,port,host='',backlog=50):
-		self.port = port
-		self.host = host
-		self.backlog = backlog
-		self.max_data_recv = 999999
+#prints color text
+def colorPrint(text,color):
+    colors = {}
+    colors['Red'] = '\033[91m'
+    colors['Green'] = '\033[92m'
+    colors['Blue'] = '\033[94m'
+    colors['Cyan'] = '\033[96m'
+    colors['White'] = '\033[97m'
+    colors['Yellow'] = '\033[93m'
+    colors['Magenta'] = '\033[95m'
+    colors['Grey'] = '\033[90m'
+    colors['Black'] = '\033[90m'
+    if colors.get(color) is None:
+        print text
+    else:
+        print colors[color]+text+"\033[0m"
 
-	def startProxy(self):
-		try:
-	        #create, bind and listen
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			s.bind((self.host, self.port))
-			s.listen(self.backlog)
-			self.colorPrint('Proxy listening on '+self.host+':'+str(self.port),92)
-		except socket.error, (value, message):
-			if s:
-				s.close()
-			print "Could not open socket: ", message
-			sys.exit(1)
+class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
-		while 1:
-			conn, addr = s.accept()
-			thread.start_new_thread(self.handleRequest, (conn, addr))
-		s.close()
+    __base = BaseHTTPServer.BaseHTTPRequestHandler
+    __base_handle = __base.handle
+    buf_len = 8192
 
-	def colorPrint(self,text,colorNum):
-	    print "\033["+str(colorNum)+"m"+text+"\033[0m"
+    def handle(self):
+        (ip, port) =  self.client_address
+        colorPrint('Request from '+str(ip)+':'+str(port),'Magenta')
+        self.__base_handle()
 
-	def handleRequest(self,conn,addr):
-		request = conn.recv(self.max_data_recv)
+    def do_GET(self):
+        #parse url
+        (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
+        soc = self.connect_to(netloc)
+        if soc:
+            #send petition to the web server
+            soc.send("%s %s %s\r\n" % (self.command,urlparse.urlunparse(('', '', path,params, query,'')),self.request_version))
+            self.headers['Connection'] = 'close'
+            del self.headers['Proxy-Connection']
+            for key_val in self.headers.items():
+                soc.send("%s: %s\r\n" % key_val)
+            soc.send("\r\n")
+            self.read_write(soc)
+            return
+        else:
+            self.send_error(404, 'Could not connect socket')
 
-		#parse url
-		try:
-			method = request.split(' ')[0]
-			url = urlparse(request.split('\n')[0].split(' ')[1])
-			self.colorPrint(method+': '+url.geturl(),94)
-		except Exception:
-			print request
-			conn.close()
-			sys.exit(1)
+    def do_CONNECT(self):
+        soc = self.connect_to(self.path)
+        if soc:
+            self.wfile.write(self.protocol_version+" 200 Connection established\r\n")
+            self.wfile.write("Proxy-agent: %s\r\n" % self.version_string())
+            self.wfile.write("\r\n")
+            self.read_write(soc)
+            return
+        else:
+            self.send_error(404, 'Could not connect socket')
 
-		#defaults ports
-		port = 80
-		if(method=='CONNECT'):
-			port = 443
-		if url.port:
-			port = url.port
+    def connect_to(self,netloc):
+        #default port
+        port = 80
+        print netloc
+        tmp = netloc.split(':')
+        host = tmp[0]
+        if len(tmp)>1:
+            colorPrint(tmp[1],'Cyan')
+            port = int(tmp[1])
+        #create socket
+        soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            soc.connect((host,port))
+            return soc
+        except socket.error, arg:
+            return 0
 
-		if(method=='CONNECT'):
-			self.handleSecure(conn, addr, request, url, port)
-		else:
-			self.handlePlain(conn, addr, request, url, port)
+    def read_write(self,soc):
+        socs = [self.connection, soc]
+        count = 0
+        while 1:
+            count += 1
+            (recv, _, error) = select.select(socs, [], socs, 3)
+            if error:
+                break
+            if recv:
+                for in_ in recv:
+                    data = in_.recv(self.buf_len)
+                    if in_ is self.connection:
+                        out = soc
+                    else:
+                        out = self.connection
+                    if data:
+                        out.send(data)
+                        count = 0
+            if count == 60:
+                break
 
-	def handlePlain(self,conn,addr,request,url,port):
-		try:
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-			s.connect((url.netloc, port))
-			#para usar proxy
-			#s.connect(('proxy.unlu.edu.ar', 8080))
-			s.send(request)
-			while 1:
-				data = s.recv(self.max_data_recv)
-				if (len(data) > 0):
-					conn.send(data)
-				else:
-					break
-			s.close()
-			conn.close()
-		except socket.error, (value, message):
-			if s:
-				s.close()
-			if conn:
-				conn.close()
-			self.colorPrint("Socket Error: "+message,91)
-			sys.exit(1)
+    do_HEAD = do_GET
+    do_POST = do_GET
 
-	def handleSecure(self,conn,addr,request,url,port):
-		try:
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
-			print url.netloc
-			s.connect((url.netloc, port))
-			conn.send('HTTP/1.1 200 Connection established\n'+'Proxy-agent: spdyProxy 0.1\n\n')
-			#para usar proxy
-			#s.connect(('proxy.unlu.edu.ar', 8080))
-			s.send(request)
-			while 1:
-				data = s.recv(self.max_data_recv)
-				if (len(data) > 0):
-					conn.send(data)
-				else:
-					break
-			s.close()
-			conn.close()
-		except socket.error, (value, message):
-			if s:
-				s.close()
-			if conn:
-				conn.close()
-			self.colorPrint("Socket Error: "+message,91)
-			sys.exit(1)
+class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer):
+    pass
 
-if __name__ == '__main__':
-	try:
-		proxy = Spdyproxy(8080)
-		proxy.startProxy()
-		#client = pymongo.MongoClient('localhost', 27017)
-		#db = client.test_database
-		#post = {"name": "maxi","text": "My first insert"}
-		#db.people.insert(post)
-		#people = db.people.find()
-		#print people[0]
-	except KeyboardInterrupt:
-		print "Ctrl C - Stopping Proxy"
-		sys.exit(1)
+if __name__ == "__main__":
+    try:
+        httpd = ThreadingHTTPServer(('localhost', 8080), RequestHandler)
+        colorPrint('Proxy on localhost:8080','White')
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print "Ctrl C - Stopping Proxy"
+        sys.exit(1)
