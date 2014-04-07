@@ -5,6 +5,8 @@ import SocketServer
 import urlparse
 import socket
 import select
+import ssl
+import re
 
 #prints color text
 def colorPrint(text,color):
@@ -28,6 +30,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
     __base_handle = __base.handle
     buf_len = 8192
+    pem_file = 'mycert.pem'
 
     def handle(self):
         (ip, port) =  self.client_address
@@ -51,16 +54,29 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         else:
             self.send_error(404, 'Could not connect socket')
 
+    do_HEAD = do_GET
+    do_POST = do_GET
+
     def do_CONNECT(self):
-        soc = self.connect_to(self.path)
+        soc = self.connect_ssl_to(self.path)
         if soc:
             self.wfile.write(self.protocol_version+" 200 Connection established\r\n")
             self.wfile.write("Proxy-agent: %s\r\n" % self.version_string())
             self.wfile.write("\r\n")
+
+            try:
+                self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.pem_file)
+            except ssl.SSLError, e:
+                logging.error(e)
+
             self.read_write(soc)
             return
         else:
             self.send_error(404, 'Could not connect socket')
+
+    def connect_ssl_to(self,netloc):
+        soc = self.connect_to(netloc)
+        return ssl.SSLSocket(soc)
 
     def connect_to(self,netloc):
         #default port
@@ -88,20 +104,30 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if error:
                 break
             if recv:
+                total_data = ''
                 for in_ in recv:
-                    data = in_.recv(self.buf_len)
+                    try:
+                        data = in_.recv(self.buf_len)
+                    except:
+                        data = 0
                     if in_ is self.connection:
+                        colorPrint('FROM CLIENT','Yellow')
                         out = soc
+                        #if data:
+                            #parse headers:
+                            #print re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data)
+                            #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
+                            #colorPrint(data,'Green')
                     else:
+                        colorPrint('FROM WEB SERVER','Yellow')
                         out = self.connection
                     if data:
+                        total_data += data
                         out.send(data)
                         count = 0
+                #colorPrint(total_data,'Magenta')
             if count == 60:
                 break
-
-    do_HEAD = do_GET
-    do_POST = do_GET
 
 class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer):
     pass
