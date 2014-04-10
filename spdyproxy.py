@@ -7,6 +7,10 @@ import socket
 import select
 import ssl
 import re
+try:
+    import spdylay
+except:
+    pass
 
 #prints color text
 def colorPrint(text,color):
@@ -133,9 +137,12 @@ class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer)
     pass
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit('Usage: %s <address> <port> <certfile>' % os.path.basename(__file__))
+
     try:
-        httpd = ThreadingHTTPServer(('localhost', 8080), RequestHandler)
-        colorPrint('Proxy on localhost:8080','White')
+        httpd = ThreadingHTTPServer((sys.argv[1], int(sys.argv[2])), RequestHandler)
+        colorPrint('Proxy listening on '+sys.argv[1]+':'+sys.argv[2],'White')
         httpd.serve_forever()
     except KeyboardInterrupt:
         print "Ctrl C - Stopping Proxy"
