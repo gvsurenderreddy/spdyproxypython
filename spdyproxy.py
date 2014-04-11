@@ -34,7 +34,11 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
     __base_handle = __base.handle
     buf_len = 8192
-    pem_file = 'mycert.pem'
+
+    #only to give it the certificate
+    def __init__(self, request, client_address, server, cert_file):
+        self.cert_file = cert_file
+        self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
         (ip, port) =  self.client_address
@@ -69,7 +73,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.wfile.write("\r\n")
 
             try:
-                self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.pem_file)
+                self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.cert_file)
             except ssl.SSLError, e:
                 logging.error(e)
 
@@ -115,7 +119,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     except:
                         data = 0
                     if in_ is self.connection:
-                        colorPrint('FROM CLIENT','Yellow')
+                        #colorPrint('FROM CLIENT','Yellow')
                         out = soc
                         #if data:
                             #parse headers:
@@ -123,7 +127,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
                             #colorPrint(data,'Green')
                     else:
-                        colorPrint('FROM WEB SERVER','Yellow')
+                        #colorPrint('FROM WEB SERVER','Yellow')
                         out = self.connection
                     if data:
                         total_data += data
@@ -134,14 +138,22 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 break
 
 class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer):
-    pass
+
+    #initialize the server with the certificate
+    def __init__(self,server_address, RequestHandlerClass, cert_file):
+        self.cert_file = cert_file
+        BaseHTTPServer.HTTPServer.__init__(self,server_address, RequestHandlerClass);
+
+    #instance request handler with certificate
+    def finish_request(self, request, client_address):
+        self.RequestHandlerClass(request, client_address, self, self.cert_file)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4:
         sys.exit('Usage: %s <address> <port> <certfile>' % os.path.basename(__file__))
 
     try:
-        httpd = ThreadingHTTPServer((sys.argv[1], int(sys.argv[2])), RequestHandler)
+        httpd = ThreadingHTTPServer((sys.argv[1], int(sys.argv[2])), RequestHandler, sys.argv[3])
         colorPrint('Proxy listening on '+sys.argv[1]+':'+sys.argv[2],'White')
         httpd.serve_forever()
     except KeyboardInterrupt:
