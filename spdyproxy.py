@@ -1,8 +1,8 @@
 import os
 import sys
-import BaseHTTPServer
-import SocketServer
-import urlparse
+import http.server as BaseHTTPServer
+import socketserver as SocketServer
+import urllib.parse as urlparse
 import socket
 import select
 import ssl
@@ -10,7 +10,52 @@ import re
 try:
     import spdylay
 except:
-    pass
+    sys.exit('spdyproxy needs spdylay library - http://tatsuhiro-t.github.io/spdylay/')
+    #TODO: fallback https without spdy
+
+#---------SPDY---------
+
+class MyStreamHandler(spdylay.BaseSPDYStreamHandler):
+    def __init__(self, url, fetcher, soc):
+        self.soc = soc #client socket
+        spdylay.BaseSPDYStreamHandler.__init__(self, url, fetcher)
+
+    def on_header(self, nv):
+        sys.stdout.write('Stream#{}\n'.format(self.stream_id))
+        for k, v in nv:
+            sys.stdout.write('{}: {}\n'.format(k, v))
+
+    def on_data(self, data):
+        sys.stdout.write('Stream#{}\n'.format(self.stream_id))
+        #sys.stdout.buffer.write(data)
+
+    def on_close(self, status_code):
+        sys.stdout.write('Stream#{} closed\n'.format(self.stream_id))
+
+class MyUrlFetcher(spdylay.UrlFetcher):
+    def __init__(self, server_address, urls, StreamHandlerClass, soc):
+        print(soc)
+        self.server_address = server_address
+        self.handlers = [StreamHandlerClass(url, self, soc) for url in urls] #this is the changed line
+        self.streams = {}
+        self.finished = []
+
+        self.ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+        self.ctx.options = ssl.OP_ALL | ssl.OP_NO_SSLv2 | \
+        ssl.OP_NO_COMPRESSION
+        self.ctx.set_npn_protocols(spdylay.get_npn_protocols())
+
+def urlfetch(urls, StreamHandlerClass, soc):
+    res = spdylay.urlsplit(urls[0])
+    if res.scheme != 'https':
+        raise spdylay.UrlFetchError('Unsupported scheme {}'.format(res.scheme))
+    hostname = res.hostname
+    port = res.port if res.port else 443
+
+    f = MyUrlFetcher((hostname, port), urls, StreamHandlerClass, soc)
+    f.loop()
+
+#---------SPDY---------
 
 #prints color text
 def colorPrint(text,color):
@@ -25,9 +70,9 @@ def colorPrint(text,color):
     colors['Grey'] = '\033[90m'
     colors['Black'] = '\033[90m'
     if colors.get(color) is None:
-        print text
+        print(text)
     else:
-        print colors[color]+text+"\033[0m"
+        print(colors[color]+text+"\033[0m")
 
 class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -38,6 +83,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     #only to give it the certificate
     def __init__(self, request, client_address, server, cert_file):
         self.cert_file = cert_file
+        self.encoding = 'UTF-8'
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -51,12 +97,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         soc = self.connect_to(netloc)
         if soc:
             #send petition to the web server
-            soc.send("%s %s %s\r\n" % (self.command,urlparse.urlunparse(('', '', path,params, query,'')),self.request_version))
+            petition = bytes("%s %s %s\r\n" % (self.command,urlparse.urlunparse(('', '', path,params, query,'')),self.request_version),self.encoding)
+            soc.send(petition)
             self.headers['Connection'] = 'close'
             del self.headers['Proxy-Connection']
             for key_val in self.headers.items():
-                soc.send("%s: %s\r\n" % key_val)
-            soc.send("\r\n")
+                soc.send(bytes("%s: %s\r\n" % key_val,self.encoding))
+            soc.send(bytes("\r\n",self.encoding))
             self.read_write(soc)
             return
         else:
@@ -68,13 +115,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_CONNECT(self):
         soc = self.connect_ssl_to(self.path)
         if soc:
-            self.wfile.write(self.protocol_version+" 200 Connection established\r\n")
-            self.wfile.write("Proxy-agent: %s\r\n" % self.version_string())
-            self.wfile.write("\r\n")
+            self.wfile.write(bytes(self.protocol_version+" 200 Connection established\r\n",self.encoding))
+            self.wfile.write(bytes("Proxy-agent: %s\r\n" % self.version_string(),self.encoding))
+            self.wfile.write(bytes("\r\n",self.encoding))
 
             try:
                 self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.cert_file)
-            except ssl.SSLError, e:
+            except ssl.SSLError as e:
                 logging.error(e)
 
             self.read_write(soc)
@@ -89,7 +136,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def connect_to(self,netloc):
         #default port
         port = 80
-        print netloc
+        print(netloc)
         tmp = netloc.split(':')
         host = tmp[0]
         if len(tmp)>1:
@@ -100,7 +147,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         try:
             soc.connect((host,port))
             return soc
-        except socket.error, arg:
+        except socket.error as arg:
             return 0
 
     def read_write(self,soc):
@@ -119,18 +166,25 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     except:
                         data = 0
                     if in_ is self.connection:
-                        #colorPrint('FROM CLIENT','Yellow')
+                        #from the client (only ssl)
                         out = soc
-                        #if data:
+
+                        #try:
+                        #    urlfetch(uris, MyStreamHandler, 'PERROS')
+                        #    print('castor')
+                        #except spdylay.UrlFetchError as error:
+                        #    print (error)
+
+                        if data:
                             #parse headers:
-                            #print re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data)
+                            #print(re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data))
                             #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
-                            #colorPrint(data,'Green')
+                            colorPrint(data.decode(self.encoding),'Green')
                     else:
-                        #colorPrint('FROM WEB SERVER','Yellow')
+                        #from the web server
                         out = self.connection
                     if data:
-                        total_data += data
+                        #total_data += data #doesnt work in python 3.3
                         out.send(data)
                         count = 0
                 #colorPrint(total_data,'Magenta')
@@ -157,5 +211,5 @@ if __name__ == "__main__":
         colorPrint('Proxy listening on '+sys.argv[1]+':'+sys.argv[2],'White')
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print "Ctrl C - Stopping Proxy"
+        print("Ctrl C - Stopping Proxy")
         sys.exit(1)
