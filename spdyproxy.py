@@ -7,6 +7,7 @@ import socket
 import select
 import ssl
 import re
+from SpdyConnection import SpdyConnection
 try:
     import spdylay
 except:
