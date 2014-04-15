@@ -14,50 +14,6 @@ except:
     sys.exit('spdyproxy needs spdylay library - http://tatsuhiro-t.github.io/spdylay/')
     #TODO: fallback https without spdy
 
-#---------SPDY---------
-
-class MyStreamHandler(spdylay.BaseSPDYStreamHandler):
-    def __init__(self, url, fetcher, soc):
-        self.soc = soc #client socket
-        spdylay.BaseSPDYStreamHandler.__init__(self, url, fetcher)
-
-    def on_header(self, nv):
-        sys.stdout.write('Stream#{}\n'.format(self.stream_id))
-        for k, v in nv:
-            sys.stdout.write('{}: {}\n'.format(k, v))
-
-    def on_data(self, data):
-        sys.stdout.write('Stream#{}\n'.format(self.stream_id))
-        #sys.stdout.buffer.write(data)
-
-    def on_close(self, status_code):
-        sys.stdout.write('Stream#{} closed\n'.format(self.stream_id))
-
-class MyUrlFetcher(spdylay.UrlFetcher):
-    def __init__(self, server_address, urls, StreamHandlerClass, soc):
-        print(soc)
-        self.server_address = server_address
-        self.handlers = [StreamHandlerClass(url, self, soc) for url in urls] #this is the changed line
-        self.streams = {}
-        self.finished = []
-
-        self.ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-        self.ctx.options = ssl.OP_ALL | ssl.OP_NO_SSLv2 | \
-        ssl.OP_NO_COMPRESSION
-        self.ctx.set_npn_protocols(spdylay.get_npn_protocols())
-
-def urlfetch(urls, StreamHandlerClass, soc):
-    res = spdylay.urlsplit(urls[0])
-    if res.scheme != 'https':
-        raise spdylay.UrlFetchError('Unsupported scheme {}'.format(res.scheme))
-    hostname = res.hostname
-    port = res.port if res.port else 443
-
-    f = MyUrlFetcher((hostname, port), urls, StreamHandlerClass, soc)
-    f.loop()
-
-#---------SPDY---------
-
 #prints color text
 def colorPrint(text,color):
     colors = {}
@@ -79,12 +35,12 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     __base = BaseHTTPServer.BaseHTTPRequestHandler
     __base_handle = __base.handle
-    buf_len = 8192
-
+    
     #only to give it the certificate
     def __init__(self, request, client_address, server, cert_file):
         self.cert_file = cert_file
         self.encoding = 'UTF-8'
+        self.buf_len = 8192
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -154,13 +110,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def read_write(self,soc):
         socs = [self.connection, soc]
         count = 0
+        total_data = ''
         while 1:
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
                 break
             if recv:
-                total_data = ''
                 for in_ in recv:
                     try:
                         data = in_.recv(self.buf_len)
@@ -169,26 +125,37 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     if in_ is self.connection:
                         #from the client (only ssl)
                         out = soc
-
-                        #try:
-                        #    urlfetch(uris, MyStreamHandler, 'PERROS')
-                        #    print('castor')
-                        #except spdylay.UrlFetchError as error:
-                        #    print (error)
-
                         if data:
                             #parse headers:
-                            #print(re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data))
+                            #print(re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data.decode(self.encoding)))
                             #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
-                            colorPrint(data.decode(self.encoding),'Green')
+                            total_data += data.decode(self.encoding)
+                            
+                            #if the petition is complete
+                            if total_data.find("\r\n\r\n") != -1:
+                                #colorPrint(total_data,'Magenta')
+                                (method, path, version) = total_data.split('\r\n')[0].split(' ')
+                                host = re.findall(r"Host: (?P<value>.*?)\r\n", total_data)[0]
+
+                                try:
+                                    spdyClient = SpdyConnection((host,443))
+                                    response = spdyClient.petition(method,path)
+                                    #self.connection.send(response['headers'])
+                                    print(response['headers'])
+                                    #self.connection.send(response['data'])
+                                except spdylay.UrlFetchError as error:
+                                    print(error)
+                                out.send(bytes(total_data,self.encoding))
+                                
+                                count = 0
+                                total_data = ''
                     else:
                         #from the web server
                         out = self.connection
-                    if data:
-                        #total_data += data #doesnt work in python 3.3
-                        out.send(data)
-                        count = 0
-                #colorPrint(total_data,'Magenta')
+                        if data:
+                            #send data to the client
+                            out.send(data)
+                            count = 0
             if count == 60:
                 break
 
