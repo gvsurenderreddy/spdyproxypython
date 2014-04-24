@@ -16,6 +16,8 @@ class SpdyConnection:
         self.streams = {}
         self.finished = []
         self.response = {}
+        self.response['headers'] = None
+        self.response['data'] = bytes('','UTF-8')
 
         #connect the socket
         self.connect(self.server_address)
@@ -55,7 +57,7 @@ class SpdyConnection:
 
         self.version = spdylay.npn_get_version(self.sock.selected_npn_protocol())
         if self.version == 0:
-            raise UrlFetchError('NPN failed')
+            raise spdylay.UrlFetchError('NPN failed')
 
     def close(self):
         self.sock.shutdown(socket.SHUT_RDWR)
@@ -101,7 +103,7 @@ class SpdyConnection:
                 and not self.finish:
             want_read = want_write = False
             try:
-                data = self.sock.recv(4096)
+                data = self.sock.recv(8192)
                 if data:
                     self.session.recv(data)
                 else:
@@ -124,8 +126,6 @@ class SpdyConnection:
         return self.response
 
     def send_cb(self, session, data):
-        self.response['headers'] = None
-        self.response['data'] = None
         return self.sock.send(data)
 
     def before_ctrl_send_cb(self, session, frame):
@@ -133,12 +133,24 @@ class SpdyConnection:
         #if frame.frame_type == spdylay.SYN_STREAM:
             #print(frame.stream_id)
 
+    def format_headers(self,headers):
+        #protocol status
+        #headers_field: header_value
+        header = ''
+        header += next(filter(lambda x:x[0]==':version',headers))[1]+' '
+        header += next(filter(lambda x:x[0]==':status',headers))[1]+'\r\n'
+        for x in headers:
+            if x[0] != ':version' and x[0] != ':status':
+                header += x[0]+': '+x[1]+'\r\n'
+        header += '\r\n'
+        return header
+
     def on_ctrl_recv_cb(self, session, frame):
         if frame.frame_type == spdylay.SYN_REPLY or frame.frame_type == spdylay.HEADERS:
-            self.response['headers'] = frame.nv
+            self.response['headers'] = self.format_headers(frame.nv)
 
     def on_data_chunk_recv_cb(self, session, flags, stream_id, data):
-        self.response['data'] = data
+        self.response['data'] += data
 
     def on_stream_close_cb(self, session, stream_id, status_code):
         #print('Stream close '+str(status_code))

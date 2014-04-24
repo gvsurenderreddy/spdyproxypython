@@ -136,17 +136,19 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 #colorPrint(total_data,'Magenta')
                                 (method, path, version) = total_data.split('\r\n')[0].split(' ')
                                 host = re.findall(r"Host: (?P<value>.*?)\r\n", total_data)[0]
-
+                                #spdy connection
+                                #TODO: connection pool, reusing the connection
                                 try:
                                     spdyClient = SpdyConnection((host,443))
                                     response = spdyClient.petition(method,path)
-                                    #self.connection.send(response['headers'])
-                                    print(response['headers'])
-                                    #self.connection.send(response['data'])
+                                    spdyClient.close()
+
+                                    if response['headers'] != None:
+                                        self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
+                                        out.close
                                 except spdylay.UrlFetchError as error:
-                                    print(error)
-                                out.send(bytes(total_data,self.encoding))
-                                
+                                    #fallback to http/https
+                                    out.send(bytes(total_data,self.encoding))
                                 count = 0
                                 total_data = ''
                     else:
