@@ -142,7 +142,7 @@ class SpdyConnection:
         for x in headers:
             if x[0] != ':version' and x[0] != ':status':
                 header += x[0]+': '+x[1]+'\r\n'
-        header += '\r\n'
+        #header += 'Transfer-Encoding: gzip\r\n'
         return header
 
     def on_ctrl_recv_cb(self, session, frame):
