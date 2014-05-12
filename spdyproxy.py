@@ -45,7 +45,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.cert_file = cert_file
         self.encoding = 'UTF-8'
         self.buf_len = 8192
-        self.timeout = 60
+        self.timeout = 20
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -144,6 +144,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             #add the first petition
             petitions_sent.append({'request':petition})
         while 1:
+            print(str(count))
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
@@ -152,7 +153,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 for in_ in recv:
                     try:
                         data = in_.recv(self.buf_len)
-                    except:
+                    except Exception as e:
+                        print(e)
                         data = 0
                     if in_ is self.connection:
                         #from the client (only ssl)
@@ -186,7 +188,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                     if actual_response != 0:
                                         petitions_sent[actual_response-1]['body'] = total_response[:result.start()]
                                         colorPrint('body added','Blue')
-                                        print(petitions_sent)
+                                        #print(petitions_sent)
                                     total_response = total_response[result.end():]
                                     actual_response += 1
                                 else:
@@ -197,10 +199,19 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             #send data to the client
                             out.send(data)
                             count = 0
+                        else:
+                            print('no hay datos')
+                            #print(petitions_sent)
+                            #print(total_response)                            
+                            if total_response != '':
+                                petitions_sent[actual_response-1]['body'] = total_response
+                                total_response = ''
+                                actual_response += 1
             if count == self.timeout:
                 break
         #last body
-        petitions_sent[actual_response-1]['body'] = total_response
+        if total_response != '':
+            petitions_sent[actual_response-1]['body'] = total_response
         colorPrint('FINAL PETITION','Blue')
         print(petitions_sent)
         #sys.stdout.buffer.write(response)
