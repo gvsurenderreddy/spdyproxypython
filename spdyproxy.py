@@ -8,7 +8,7 @@ import select
 import ssl
 import re
 from SpdyConnection import SpdyConnection
-from bitstring import ConstBitStream
+#from bitstring import ConstBitStream
 try:
     import spdylay
 except:
