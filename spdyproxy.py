@@ -175,25 +175,25 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         #from the web server
                         out = self.connection
                         if data:
-                            #try:
-                            total_response += str(data)[2:-1] #eliminates 'b ... '
-                            result = self.search_header(total_response)
-                            if result != 0:
-                                petitions_sent[actual_response]['header'] = total_response[result.start():result.end()]
-                                colorPrint(str(petitions_sent[actual_response]['header']),'Red')
-                                #the first resource could not be completed
-                                if actual_response != 0:
-                                    petitions_sent[actual_response-1]['body'] = total_response
-                                total_response = total_response[result.end():]
-
-                                actual_response += 1
-                                #colorPrint('-----------','Blue')
-                            else:
+                            try:
+                                total_response += str(data)[2:-1] #eliminates 'b ... '
+                                result = self.search_header(total_response)
+                                if result != 0:
+                                    colorPrint('-----------'+str(actual_response),'Blue')
+                                    petitions_sent[actual_response]['header'] = total_response[result.start():result.end()]
+                                    colorPrint('HEADER :'+str(petitions_sent[actual_response]['header']),'Red')
+                                    #the first resource could not be completed
+                                    if actual_response != 0:
+                                        petitions_sent[actual_response-1]['body'] = total_response[:result.start()]
+                                        colorPrint('body added','Blue')
+                                        print(petitions_sent)
+                                    total_response = total_response[result.end():]
+                                    actual_response += 1
+                                else:
+                                    pass
+                            except Exception as e:
+                                print(e)
                                 pass
-                                    #print(total_response)
-                            #except Exception as e:
-                            #    print(e)
-                            #    pass
                             #send data to the client
                             out.send(data)
                             count = 0
@@ -201,6 +201,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 break
         #last body
         petitions_sent[actual_response-1]['body'] = total_response
+        colorPrint('FINAL PETITION','Blue')
         print(petitions_sent)
         #sys.stdout.buffer.write(response)
         colorPrint('------------------','Blue')
