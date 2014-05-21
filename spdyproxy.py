@@ -18,6 +18,9 @@ STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
 BYTES = "b'(.*)'$"
 SEPARATOR = "\\r\\n\\r\\n"
 
+#default parameters
+BW = 10 #MegaBytes
+
 #prints color text
 def colorPrint(text,color):
     colors = {}
@@ -169,7 +172,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 
                                 petitions_sent.append({'resource':total_data})
                                 
-                                colorPrint('envio peticion','Red')
                                 out.send(bytes(total_data,self.encoding))
                                 count = 0
                                 total_data = ''
@@ -200,7 +202,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             out.send(data)
                             count = 0
                         else:
-                            print('no hay datos')
                             #print(petitions_sent)
                             #print(total_response)                            
                             if total_response != '':
