@@ -12,27 +12,25 @@
 #.sort() asc
 
 from pymongo import MongoClient
+import datetime
+import os
 
 CLIENT = MongoClient('localhost', 27017)
 DB = CLIENT.proxy
 
-class baseDB():
-    def __init__(self,db):
-        self.db = client[db]
-    def insert(self,obj):
-        result = self.db.insert(obj)
-        if result:
-            return result
-        return 0
+def timestamp():
+    return datetime.datetime.now()
 
 class Cache():
 
-    def __init__(self):
+    def __init__(self,max_size=20):
         self.table = DB.cache
+        self.max_size = max_size
 
     def insertResource(self,host,path,headers=None,body=None,size=None):
         try:
             #check cacheable
+            #check if exists
             insert = {'host': host,'path': path,'headers':'','body':'','hits':0}
             if headers != None:
                 insert['headers'] = headers
@@ -46,15 +44,18 @@ class Cache():
             print(e)
 
     def searchResource(self,host,path):
+        print('searching... '+host+path)
         try:
-            result = self.table.find_one({'host':host, 'path':path})
+            result = self.table.find({'host':host, 'path':path})
             if result.count() != 0:
                 #check freshness
                 #revalidate resource
                 #return resource
-                pass
+                print('cache hit!')
+                return result[0]
             else:
                 #resource not found
+                print('cache miss')
                 return 0
         except Exception as e:
             print(e)
@@ -72,7 +73,7 @@ class RttMeasure():
     def __init__(self):
         self.table = DB.rtt
 
-    def saveRTT(self,host,time,timestamp):
+    def saveRTT(self,host,ping,timestamp=timestamp()):
         try:
             insert = {"host": host,"ping": ping,"timestamp":timestamp}
             self.table.insert(insert)
@@ -81,20 +82,30 @@ class RttMeasure():
 
     def getLastRTT(self,host):
         try:
-            result = self.table.find_one({'host':host}).sort('timestamp')
+            result = DB.rtt.find({'host':host}).sort('timestamp')
             if result.count() != 0:
                 return result[result.count()-1]['ping']
             else:
-                return self.findRTT(host)
+                rtt = self.findRTT(host)
+                if rtt != 0:
+                    self.saveRTT(host,rtt)
+                return rtt
         except Exception as e:
             print(e)
 
+    #return ping in ms    
     def findRTT(self,host):
-        return 0
+        try:
+            res = os.popen("ping -c 1 "+host).read()
+            res = res.split('time=')
+            res = res[1].split(' ms')
+            return res[0]
+        except:
+            return 0
 
 if __name__ == "__main__":
     try:
-        client = MongoClient('localhost', 27017)
+        '''client = MongoClient('localhost', 27017)
         db = client.test #selecting database
         insert = {'ping':2,'host':'www.google.com'}
         db.tabla.insert(insert)
@@ -106,5 +117,9 @@ if __name__ == "__main__":
         #print(people.count())
         if people.count() != 0:
             print(people[people.count()-1]['ping'])
+            '''
+        rttM = RttMeasure()
+        ping = rttM.getLastRTT('www.google.com')
+        print(ping)
     except Exception as e:
         print(e)

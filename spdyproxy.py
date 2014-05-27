@@ -7,12 +7,13 @@ import socket
 import select
 import ssl
 import re
-from SpdyConnection import SpdyConnection
-#from bitstring import ConstBitStream
 try:
     import spdylay
 except:
     sys.exit('spdyproxy needs spdylay library - http://tatsuhiro-t.github.io/spdylay/')
+from SpdyConnection import SpdyConnection
+from db import Cache
+from db import RttMeasure
 
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
 BYTES = "b'(.*)'$"
@@ -43,12 +44,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
     __base_handle = __base.handle
     
-    #only to give it the certificate
     def __init__(self, request, client_address, server, cert_file):
         self.cert_file = cert_file
         self.encoding = 'UTF-8'
         self.buf_len = 8192
         self.timeout = 20
+        self.rttMeasure = RttMeasure()
+        self.Cache = Cache(20)
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -59,20 +61,27 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def do_GET(self):
         #parse url
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
-        soc = self.connect_to(netloc)
-        if soc:
-            #send petition to the web server
-            petition = bytes("%s %s %s\r\n" % (self.command,urlparse.urlunparse(('', '', path,params, query,'')),self.request_version),self.encoding)
-            soc.send(petition)
-            self.headers['Connection'] = 'close'
-            del self.headers['Proxy-Connection']
-            for key_val in self.headers.items():
-                soc.send(bytes("%s: %s\r\n" % key_val,self.encoding))
-            soc.send(bytes("\r\n",self.encoding))
-            self.read_write(soc,petition)
-            return
+        #checking cache
+        result = self.Cache.searchResource(netloc,path)
+        if result:
+            #return resource from cache
+            self.connection.send(bytes(result['headers'],self.encoding))
+            self.connection.send(bytes(result['body'],self.encoding))
         else:
-            self.send_error(404, 'Could not connect socket')
+            soc = self.connect_to(netloc)
+            if soc:
+                #send petition to the web server
+                petition = bytes("%s %s %s\r\n" % (self.command,urlparse.urlunparse(('', '', path,params, query,'')),self.request_version),self.encoding)
+                soc.send(petition)
+                self.headers['Connection'] = 'close'
+                del self.headers['Proxy-Connection']
+                for key_val in self.headers.items():
+                    soc.send(bytes("%s: %s\r\n" % key_val,self.encoding))
+                soc.send(bytes("\r\n",self.encoding))
+                self.read_write(soc,netloc,petition)
+                return
+            else:
+                self.send_error(404, 'Could not connect socket')
 
     do_HEAD = do_GET
     do_POST = do_GET
@@ -84,6 +93,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             spdyClient = SpdyConnection((self.path.split(':')[0],443))
             spdyClient.close()
             soc = 'spdy'
+            #always https (test)
             soc = self.connect_ssl_to(self.path)
         except spdylay.UrlFetchError as error:
             soc = self.connect_ssl_to(self.path)
@@ -100,7 +110,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if soc == 'spdy':
                 self.read_write_spdy()
             else:
-                self.read_write(soc)
+                self.read_write(soc,self.path.split(':')[0])
             return
         else:
             self.send_error(404, 'Could not connect socket')
@@ -126,7 +136,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         except socket.error as arg:
             return 0
 
-    def read_write(self,soc,petition=None):
+    def read_write(self,soc,host,petition=None):
         socs = [self.connection, soc]
         count = 0
         total_response = total_data = ''
@@ -147,7 +157,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             #add the first petition
             petitions_sent.append({'request':petition})
         while 1:
-            print(str(count))
+            #print(str(count))
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
@@ -168,7 +178,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         if data:
                             total_data += data.decode(self.encoding)
                             if total_data.find('\r\n\r\n') != -1:
-                                print(total_data)
+                                #print(total_data)
                                 
                                 petitions_sent.append({'resource':total_data})
                                 
@@ -183,9 +193,9 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 total_response += str(data)[2:-1] #eliminates 'b ... '
                                 result = self.search_header(total_response)
                                 if result != 0:
-                                    colorPrint('-----------'+str(actual_response),'Blue')
+                                    #colorPrint('-----------'+str(actual_response),'Blue')
                                     petitions_sent[actual_response]['header'] = total_response[result.start():result.end()]
-                                    colorPrint('HEADER :'+str(petitions_sent[actual_response]['header']),'Red')
+                                    #colorPrint('HEADER :'+str(petitions_sent[actual_response]['header']),'Red')
                                     #the first resource could not be completed
                                     if actual_response != 0:
                                         petitions_sent[actual_response-1]['body'] = total_response[:result.start()]
@@ -213,10 +223,17 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         #last body
         if total_response != '':
             petitions_sent[actual_response-1]['body'] = total_response
-        colorPrint('FINAL PETITION','Blue')
-        print(petitions_sent)
+
+        self.analyzeResources(host,petitions_sent)
+        #colorPrint('FINAL PETITION','Blue')
+        #print(petitions_sent)
         #sys.stdout.buffer.write(response)
-        colorPrint('------------------','Blue')
+
+    #statistics and caching
+    def analyzeResources(self,host,resources):
+        for resource in resources:
+            path = resource['request'].decode(self.encoding).split(' ')
+            #self.Cache.insertResource(host,path[1],str(resource['header']),str(resource['body']),len(resource['body']))
 
     #search header and returns start and end of the header
     def search_header(self,var):
