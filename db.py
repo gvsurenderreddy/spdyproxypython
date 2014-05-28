@@ -31,15 +31,16 @@ class Cache():
         try:
             #check cacheable
             #check if exists
-            insert = {'host': host,'path': path,'headers':'','body':'','hits':0}
-            if headers != None:
-                insert['headers'] = headers
-            if body != None:
-                insert['body'] = body
-            #get size len(body)
-            #get items count from the html
-
-            self.table.insert(insert)
+            if self.searchResource(host,path) == 0:
+                insert = {'host': host,'path': path,'headers':'','body':'','hits':0}
+                if headers != None:
+                    insert['headers'] = headers
+                if body != None:
+                    insert['body'] = body
+                    if size is None:
+                        insert['size'] = len(body)
+                #get items count from the html
+                self.table.insert(insert)
         except Exception as e:
             print(e)
 

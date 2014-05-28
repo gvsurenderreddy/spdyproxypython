@@ -65,8 +65,14 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         result = self.Cache.searchResource(netloc,path)
         if result:
             #return resource from cache
-            self.connection.send(bytes(result['headers'],self.encoding))
-            self.connection.send(bytes(result['body'],self.encoding))
+            #print(result['headers'])
+            #self.connection.send(bytes(result['headers'],self.encoding))
+            body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'+result['body']
+            print(result['body'])
+            print(body)
+            self.connection.send(body.encode(self.encoding))
+            
+            #self.connection.send(bytes('<html>pija</html>',self.encoding))
         else:
             soc = self.connect_to(netloc)
             if soc:
@@ -233,7 +239,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def analyzeResources(self,host,resources):
         for resource in resources:
             path = resource['request'].decode(self.encoding).split(' ')
-            #self.Cache.insertResource(host,path[1],str(resource['header']),str(resource['body']),len(resource['body']))
+            self.Cache.insertResource(host,path[1],resource['header'],resource['body'],len(resource['body']))
 
     #search header and returns start and end of the header
     def search_header(self,var):
