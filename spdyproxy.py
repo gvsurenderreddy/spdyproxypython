@@ -71,8 +71,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             print(result['body'])
             print(body)
             self.connection.send(body.encode(self.encoding))
-            
-            #self.connection.send(bytes('<html>pija</html>',self.encoding))
         else:
             soc = self.connect_to(netloc)
             if soc:
