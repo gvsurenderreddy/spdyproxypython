@@ -16,9 +16,10 @@ from db import Cache
 from db import RttMeasure
 
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
+STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\r\\n\\r\\n"
 BYTES = "b'(.*)'$"
 SEPARATOR = "\\r\\n\\r\\n"
-
+SEPARATOR = "\r\n\r\n"
 #default parameters
 BW = 10 #MegaBytes
 
@@ -66,11 +67,14 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if result:
             #return resource from cache
             #print(result['headers'])
-            #self.connection.send(bytes(result['headers'],self.encoding))
-            body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'+result['body']
+            #self.connection.send(bytes(result['header'],self.encoding))
+            #body = result['body']
+            body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'#+"<html><body><h3>perros</h3></body></html>"#result['body']
             print(result['body'])
             print(body)
             self.connection.send(body.encode(self.encoding))
+            self.connection.send(result['body'].encode(self.encoding))
+            #self.connection.send(bytes("",self.encoding))
         else:
             soc = self.connect_to(netloc)
             if soc:
@@ -194,7 +198,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         out = self.connection
                         if data:
                             try:
-                                total_response += str(data)[2:-1] #eliminates 'b ... '
+                                #total_response += str(data)[2:-1] #eliminates 'b ... '
+                                total_response += data.decode('unicode_escape')
                                 result = self.search_header(total_response)
                                 if result != 0:
                                     #colorPrint('-----------'+str(actual_response),'Blue')
@@ -236,6 +241,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     #statistics and caching
     def analyzeResources(self,host,resources):
         for resource in resources:
+            print(resource)
             path = resource['request'].decode(self.encoding).split(' ')
             self.Cache.insertResource(host,path[1],resource['header'],resource['body'],len(resource['body']))
 

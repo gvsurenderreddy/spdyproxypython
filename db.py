@@ -27,14 +27,14 @@ class Cache():
         self.table = DB.cache
         self.max_size = max_size
 
-    def insertResource(self,host,path,headers=None,body=None,size=None):
+    def insertResource(self,host,path,header=None,body=None,size=None):
         try:
             #check cacheable
             #check if exists
             if self.searchResource(host,path) == 0:
-                insert = {'host': host,'path': path,'headers':'','body':'','hits':0}
-                if headers != None:
-                    insert['headers'] = headers
+                insert = {'host': host,'path': path,'header':'','body':'','hits':0}
+                if header != None:
+                    insert['header'] = header
                 if body != None:
                     insert['body'] = body
                     if size is None:
