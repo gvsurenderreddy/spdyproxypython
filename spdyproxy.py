@@ -67,14 +67,15 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if result:
             #return resource from cache
             #print(result['headers'])
-            #self.connection.send(bytes(result['header'],self.encoding))
+            self.connection.send(bytes(result['header'],self.encoding))
             #body = result['body']
-            body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'#+"<html><body><h3>perros</h3></body></html>"#result['body']
-            print(result['body'])
-            print(body)
-            self.connection.send(body.encode(self.encoding))
-            self.connection.send(result['body'].encode(self.encoding))
-            #self.connection.send(bytes("",self.encoding))
+            #body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'#+"<html><body><h3>perros</h3></body></html>"#result['body']
+            #self.connection.send(body.encode(self.encoding))
+            #print(result['body'])
+            #print(body)
+            #self.connection.send(body.encode(self.encoding))
+            #self.connection.send(body.encode(self.encoding))
+            self.connection.send(bytes(result['body'],self.encoding))
         else:
             soc = self.connect_to(netloc)
             if soc:
@@ -243,7 +244,11 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         for resource in resources:
             print(resource)
             path = resource['request'].decode(self.encoding).split(' ')
-            self.Cache.insertResource(host,path[1],resource['header'],resource['body'],len(resource['body']))
+            try:
+                body = resource['body']
+            except:
+                body = None
+            self.Cache.insertResource(host,path[1],resource['header'],body,len(resource['body']))
 
     #search header and returns start and end of the header
     def search_header(self,var):

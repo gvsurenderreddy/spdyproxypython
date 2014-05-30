@@ -14,6 +14,7 @@
 from pymongo import MongoClient
 import datetime
 import os
+from decodeChunked import decodeChunked
 
 CLIENT = MongoClient('localhost', 27017)
 DB = CLIENT.proxy
@@ -36,6 +37,9 @@ class Cache():
                 if header != None:
                     insert['header'] = header
                 if body != None:
+                    if insert['header'].find('chunked') != -1:
+                        body = decodeChunked(body)
+                        insert['header'] = insert['header'].replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
                     insert['body'] = body
                     if size is None:
                         insert['size'] = len(body)
