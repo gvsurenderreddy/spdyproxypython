@@ -66,15 +66,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         result = self.Cache.searchResource(netloc,path)
         if result:
             #return resource from cache
-            #print(result['headers'])
             self.connection.send(bytes(result['header'],self.encoding))
-            #body = result['body']
-            #body = 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n'#+"<html><body><h3>perros</h3></body></html>"#result['body']
-            #self.connection.send(body.encode(self.encoding))
-            #print(result['body'])
-            #print(body)
-            #self.connection.send(body.encode(self.encoding))
-            #self.connection.send(body.encode(self.encoding))
             self.connection.send(bytes(result['body'],self.encoding))
         else:
             soc = self.connect_to(netloc)
@@ -186,12 +178,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         #    count = 0
                         if data:
                             total_data += data.decode(self.encoding)
+                            #find petition
                             if total_data.find('\r\n\r\n') != -1:
-                                #print(total_data)
                                 
-                                petitions_sent.append({'resource':total_data})
+                                request = bytes(total_data,self.encoding)
+                                petitions_sent.append({'request':request})
+                                out.send(request)
                                 
-                                out.send(bytes(total_data,self.encoding))
                                 count = 0
                                 total_data = ''
                     else:
@@ -199,8 +192,11 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         out = self.connection
                         if data:
                             try:
-                                #total_response += str(data)[2:-1] #eliminates 'b ... '
-                                total_response += data.decode('unicode_escape')
+                                #total_response += str(data)[2:-1].replace('\\\\','\\') #eliminates 'b ... '
+                                try:
+                                    total_response += data.decode('unicode_escape','ignore')
+                                except Exception as e:
+                                    print(e)
                                 result = self.search_header(total_response)
                                 if result != 0:
                                     #colorPrint('-----------'+str(actual_response),'Blue')
@@ -210,6 +206,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                     if actual_response != 0:
                                         petitions_sent[actual_response-1]['body'] = total_response[:result.start()]
                                         colorPrint('body added','Blue')
+                                        self.analyzeResource(host,petitions_sent[actual_response-1])
                                         #print(petitions_sent)
                                     total_response = total_response[result.end():]
                                     actual_response += 1
@@ -217,15 +214,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                     pass
                             except Exception as e:
                                 print(e)
-                                pass
                             #send data to the client
                             out.send(data)
                             count = 0
                         else:
-                            #print(petitions_sent)
-                            #print(total_response)                            
                             if total_response != '':
                                 petitions_sent[actual_response-1]['body'] = total_response
+                                self.analyzeResource(host,petitions_sent[actual_response-1])
                                 total_response = ''
                                 actual_response += 1
             if count == self.timeout:
@@ -233,22 +228,19 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         #last body
         if total_response != '':
             petitions_sent[actual_response-1]['body'] = total_response
-
-        self.analyzeResources(host,petitions_sent)
-        #colorPrint('FINAL PETITION','Blue')
+            self.analyzeResource(host,petitions_sent[actual_response-1])
         #print(petitions_sent)
         #sys.stdout.buffer.write(response)
 
     #statistics and caching
-    def analyzeResources(self,host,resources):
-        for resource in resources:
-            print(resource)
-            path = resource['request'].decode(self.encoding).split(' ')
-            try:
-                body = resource['body']
-            except:
-                body = None
-            self.Cache.insertResource(host,path[1],resource['header'],body,len(resource['body']))
+    def analyzeResource(self,host,resource):
+        print(resource)
+        path = resource['request'].decode(self.encoding).split(' ')
+        try:
+            body = resource['body']
+        except:
+            body = None
+        self.Cache.insertResource(host,path[1],resource['header'],body,len(resource['body']))
 
     #search header and returns start and end of the header
     def search_header(self,var):

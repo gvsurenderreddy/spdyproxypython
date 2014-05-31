@@ -37,7 +37,7 @@ class Cache():
                 if header != None:
                     insert['header'] = header
                 if body != None:
-                    if insert['header'].find('chunked') != -1:
+                    if insert['header'].find('chunked') != -1 and insert['header'].find('gzip') == -1:
                         body = decodeChunked(body)
                         insert['header'] = insert['header'].replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
                     insert['body'] = body
