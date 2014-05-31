@@ -14,7 +14,9 @@
 from pymongo import MongoClient
 import datetime
 import os
+import socket
 from decodeChunked import decodeChunked
+from SpdyConnection import SpdyConnection
 
 CLIENT = MongoClient('localhost', 27017)
 DB = CLIENT.proxy
@@ -30,21 +32,26 @@ class Cache():
 
     def insertResource(self,host,path,header=None,body=None,size=None):
         try:
-            #check cacheable
+            #TODO check cacheable
+            insert = {'host': host,'path': path,'header':'','body':'','hits':0}
+            if header != None:
+                insert['header'] = header
+            if body != None:
+                if insert['header'].find('chunked') != -1 and insert['header'].find('gzip') == -1:
+                    print('unchunk')
+                    body = decodeChunked(body)
+                    insert['header'] = insert['header'].replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
+                insert['body'] = body
+                if size is None:
+                    insert['size'] = len(body)
+
+            #TODO get items count from the html
+
             #check if exists
             if self.searchResource(host,path) == 0:
-                insert = {'host': host,'path': path,'header':'','body':'','hits':0}
-                if header != None:
-                    insert['header'] = header
-                if body != None:
-                    if insert['header'].find('chunked') != -1 and insert['header'].find('gzip') == -1:
-                        body = decodeChunked(body)
-                        insert['header'] = insert['header'].replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
-                    insert['body'] = body
-                    if size is None:
-                        insert['size'] = len(body)
-                #get items count from the html
                 self.table.insert(insert)
+            else:
+                self.table.update({'host':host, 'path':path},insert)
         except Exception as e:
             print(e)
 
@@ -108,6 +115,51 @@ class RttMeasure():
         except:
             return 0
 
+#host,http=0,https=0,spdy=0
+class MethodGuesser():
+
+    def __init__(self,max_size=20):
+        self.table = DB.availableMethods
+
+    def getMethod(self,host):
+        result = self.table.find({'host':host})
+        if result.count() != 0:
+            return result[0]
+
+    def guesser(self,host):
+        guessing = {'host':host,'http':0,'https':0,'spdy':0}
+        #trying http...
+        try:
+            soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            soc.connect((host,80))
+            guessing['http'] = 1
+            soc.close()
+        except Exception as e:
+            pass
+        #trying https...
+        try:
+            soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            soc.settimeout(2)
+            soc.connect((host,443))
+            guessing['https'] = 1
+            soc.close()
+        except Exception as e:
+            pass
+        #trying spdy...
+        try:
+            spdyClient = SpdyConnection((host,443))
+            spdyClient.close()
+            guessing['spdy'] = 1
+        except Exception as e:
+            pass
+        search = {'host':host}
+        result = self.table.find(search)
+        if result.count() != 0:
+            self.table.update(search,guessing)
+        else:
+            print('insert available methods')
+            self.table.insert(guessing)
+
 if __name__ == "__main__":
     try:
         '''client = MongoClient('localhost', 27017)
@@ -122,9 +174,15 @@ if __name__ == "__main__":
         #print(people.count())
         if people.count() != 0:
             print(people[people.count()-1]['ping'])
-            '''
+            
         rttM = RttMeasure()
         ping = rttM.getLastRTT('www.google.com')
         print(ping)
+        '''
+        guess = MethodGuesser()
+        print(guess.getMethod('www.unlu.edu.ar'))
+        print(guess.getMethod('www.google.com.ar'))
+        print(guess.getMethod('www.asocmedicalujan.com.ar'))
+
     except Exception as e:
         print(e)

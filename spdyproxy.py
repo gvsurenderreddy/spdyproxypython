@@ -158,7 +158,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             #add the first petition
             petitions_sent.append({'request':petition})
         while 1:
-            #print(str(count))
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
             if error:
@@ -173,18 +172,19 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     if in_ is self.connection:
                         #from the client (only ssl)
                         out = soc
-                        #if data:
-                        #    out.send(data)
-                        #    count = 0
                         if data:
                             total_data += data.decode(self.encoding)
                             #find petition
                             if total_data.find('\r\n\r\n') != -1:
-                                
+                                #checking cache
+                                result = self.Cache.searchResource(host,total_data.split(' ')[1])
+                                if result:
+                                    print('cacheeeeee hit')
+
                                 request = bytes(total_data,self.encoding)
                                 petitions_sent.append({'request':request})
                                 out.send(request)
-                                
+
                                 count = 0
                                 total_data = ''
                     else:
@@ -199,15 +199,15 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                     print(e)
                                 result = self.search_header(total_response)
                                 if result != 0:
-                                    #colorPrint('-----------'+str(actual_response),'Blue')
+                                    #extract header
                                     petitions_sent[actual_response]['header'] = total_response[result.start():result.end()]
-                                    #colorPrint('HEADER :'+str(petitions_sent[actual_response]['header']),'Red')
+
                                     #the first resource could not be completed
                                     if actual_response != 0:
                                         petitions_sent[actual_response-1]['body'] = total_response[:result.start()]
                                         colorPrint('body added','Blue')
                                         self.analyzeResource(host,petitions_sent[actual_response-1])
-                                        #print(petitions_sent)
+
                                     total_response = total_response[result.end():]
                                     actual_response += 1
                                 else:
@@ -234,7 +234,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     #statistics and caching
     def analyzeResource(self,host,resource):
-        print(resource)
         path = resource['request'].decode(self.encoding).split(' ')
         try:
             body = resource['body']
@@ -247,8 +246,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         #STATUS_LINE
         result = re.search(STATUS_LINE, var, flags=re.DOTALL)
         if result:
-            #print('resultado '+str(result.start())+' - '+str(result.end()))
-            #colorPrint(str(var).split(SEPARATOR)[0],'White')
             if var.find(SEPARATOR) != -1:
                 #the header is complete
                 return result
