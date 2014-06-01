@@ -33,7 +33,7 @@ class SpdyConnection:
                 af, socktype, proto, canonname, sa = res
                 try:
                     self.sock = socket.socket(af, socktype, proto)
-                    self.sock.settimeout(2)
+                    #self.sock.settimeout(2)
                 except OSError as msg:
                     self.sock = None
                     continue

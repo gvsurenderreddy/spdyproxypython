@@ -14,6 +14,7 @@ except:
 from SpdyConnection import SpdyConnection
 from db import Cache
 from db import RttMeasure
+import http.client
 
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\r\\n\\r\\n"
@@ -69,6 +70,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.connection.send(bytes(result['header'],self.encoding))
             self.connection.send(bytes(result['body'],self.encoding))
         else:
+            self.read_write('http')
+            '''
             soc = self.connect_to(netloc)
             if soc:
                 #send petition to the web server
@@ -79,10 +82,12 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 for key_val in self.headers.items():
                     soc.send(bytes("%s: %s\r\n" % key_val,self.encoding))
                 soc.send(bytes("\r\n",self.encoding))
-                self.read_write(soc,netloc,petition)
+                #self.read_write(soc,netloc,petition)
+                self.read_write_spdy()
                 return
             else:
                 self.send_error(404, 'Could not connect socket')
+            '''
 
     do_HEAD = do_GET
     do_POST = do_GET
@@ -111,7 +116,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if soc == 'spdy':
                 self.read_write_spdy()
             else:
-                self.read_write(soc,self.path.split(':')[0])
+                #self.read_write(soc,self.path.split(':')[0])
+                self.read_write('https')
             return
         else:
             self.send_error(404, 'Could not connect socket')
@@ -137,7 +143,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         except socket.error as arg:
             return 0
 
-    def read_write(self,soc,host,petition=None):
+    def read_writeOLD(self,soc,host,petition=None):
         socs = [self.connection, soc]
         count = 0
         total_response = total_data = ''
@@ -156,7 +162,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         #only on GET method
         if petition != None:
             #add the first petition
-            petitions_sent.append({'request':petition})
+            petitions_sent.append({'request':petition.decode()})
         while 1:
             count += 1
             (recv, _, error) = select.select(socs, [], socs, 3)
@@ -182,7 +188,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                     print('cacheeeeee hit')
 
                                 request = bytes(total_data,self.encoding)
-                                petitions_sent.append({'request':request})
+                                petitions_sent.append({'request':total_data})
                                 out.send(request)
 
                                 count = 0
@@ -229,12 +235,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if total_response != '':
             petitions_sent[actual_response-1]['body'] = total_response
             self.analyzeResource(host,petitions_sent[actual_response-1])
-        #print(petitions_sent)
+        print(petitions_sent)
         #sys.stdout.buffer.write(response)
 
     #statistics and caching
     def analyzeResource(self,host,resource):
-        path = resource['request'].decode(self.encoding).split(' ')
+        #path = resource['request'].decode(self.encoding).split(' ')
+        path = resource['request'].split(' ')
         try:
             body = resource['body']
         except:
@@ -251,54 +258,144 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 return result
         return 0
 
-    def read_write_spdy(self):
+    def read_write(self,method):
+        host = self.path.split(':')[0]
         count = 0
         total_data = ''
+        #array with the petitions and the response
+        petitions_sent = []
+        #request + header + body
+        resource = {}
+        resource['request'] = ''
+        resource['header'] = ''
+        resource['body'] = ''
+        actual_response = 0
+        if method == 'http':
+            (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
+            print(host,self.command,path)
+            conn = http.client.HTTPConnection(netloc,80)
+            del self.headers['Proxy-Connection']
+            conn.request(self.command,urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
+            response = conn.getresponse()
+            headers = response.getheaders()
+            body = response.read()
+            final_header = ''
+            for header in headers:
+                final_header += header[0]+': '+header[1]+'\r\n'
+            final_header += 'Connection: close\r\n\r\n'
+            final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
+            status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
+            self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
+            conn.close()
+        else:
+            while 1:
+                count += 1
+                try:
+                    data = self.connection.recv(self.buf_len)
+                    if data:
+                        #parse headers:
+                        #print(re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data.decode(self.encoding)))
+                        #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
+                        total_data += data.decode(self.encoding)
+                        #if the petition is complete
+                        if total_data.find("\r\n\r\n") != -1:
+                            #petitions_sent.append({'request':total_data})
+                            (method, path, version) = total_data.split('\r\n')[0].split(' ')
+                            #host = re.findall(r"Host: (?P<value>.*?)\r\n", total_data)[0]
+                            headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
+                            print(method,path)
+                            print(headers)
+                            conn = http.client.HTTPSConnection(host,443)
+                            conn.request(method,path)
+                            response = conn.getresponse()
+                            headers = response.getheaders()
+                            body = response.read()
+                            final_header = ''
+                            for header in headers:
+                                final_header += header[0]+': '+header[1]+'\r\n'
+                            final_header = final_header.replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
+                            final_header += '\r\n'
+                            status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
+                            print(status,final_header)
+                            if final_header.find("image") != -1:
+                                print(body)
+                            self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
+                except Exception as e:
+                    print(e)
+                if count == self.timeout:
+                    break
+
+    def read_write_spdy(self):
+        host = self.path.split(':')[0]
+        count = 0
+        total_data = ''
+        #array with the petitions and the response
+        petitions_sent = []
+        #request + header + body
+        resource = {}
+        resource['request'] = ''
+        resource['header'] = ''
+        resource['body'] = ''
+        actual_response = 0
         while 1:
             count += 1
             try:
                 data = self.connection.recv(self.buf_len)
-
                 if data:
                     #parse headers:
                     #print(re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", data.decode(self.encoding)))
                     #data = data.replace('Accept-Encoding: gzip, deflate\r\n','')
                     total_data += data.decode(self.encoding)
-                    #print(data.decode(self.encoding))
                     #if the petition is complete
                     if total_data.find("\r\n\r\n") != -1:
-                        #colorPrint(total_data,'Magenta')
+                        petitions_sent.append({'request':total_data})
                         (method, path, version) = total_data.split('\r\n')[0].split(' ')
                         #host = re.findall(r"Host: (?P<value>.*?)\r\n", total_data)[0]
-                        host = self.path.split(':')[0]
-                        print(host,path)
-                        #spdy connection
-                        #TODO: connection pool, reusing the connection
-                        try:
-                            spdyClient = SpdyConnection((host,443))
-                            response = spdyClient.petition(method,path)
-                            spdyClient.close()
+                        
+                        conn = http.client.HTTPConnection(host)
+                        conn.request(method,path)
+                        t = conn.getresponse()
+                        h = t.getheaders()
+                        body = t.read()
+                        print(body)
+                        hea = ''
+                        for header in h:
+                            hea += header[0]+': '+header[1]+'\r\n'
+                        hea += '\r\n'
 
-                            if response['headers'] != None:
-                                print(response['headers'])
-                                response['headers'] += 'Content-Length:'+str(len(response['data']))+'\r\n\r\n\r\n'
-                                print(response['headers'])
-                                self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
-                                count = 0
-                                total_data = ''
-                            else:
-                                colorPrint('spdy response error','Blue')
-                        except spdylay.UrlFetchError as error:
-                            #fallback to http/https
-                            colorPrint('spdy connection error','Blue')
-                            pass
+                        self.connection.send(bytes(hea,self.encoding)+body)
+
+                        '''result = self.Cache.searchResource(host,path)
+                        if result:
+                            print('cacheeeeee hit')
+                            self.connection.send(bytes(result['header'],self.encoding)+result['body'])
+                        else:
+                            #spdy connection
+                            #TODO: connection pool, reusing the connection
+                            try:
+                                spdyClient = SpdyConnection((host,443))
+                                response = spdyClient.petition(method,path)
+                                spdyClient.close()
+
+                                if response['headers'] != None:
+                                    response['headers'] += 'Content-Length:'+str(len(response['data']))+'\r\n\r\n\r\n'
+                                    petitions_sent[actual_response]['header'] = response['headers']
+                                    petitions_sent[actual_response]['body'] = response['data']
+                                    actual_response += 1
+                                    self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
+                                    self.analyzeResource(host,petitions_sent[actual_response-1])
+                                    count = 0
+                                    total_data = ''
+                                else:
+                                    colorPrint('spdy response error','Blue')
+                            except spdylay.UrlFetchError as error:
+                                #fallback to http/https
+                                colorPrint('spdy connection error','Blue')
+                                pass
+                                '''
             except Exception as e:
                 print(e)
-                colorPrint('data receive error','Blue')
-                pass
             if count == self.timeout:
-                #print('closing connection...')
-                #self.connection.close()
                 break
 
 class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer):
