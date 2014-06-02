@@ -15,7 +15,7 @@ from pymongo import MongoClient
 import datetime
 import os
 import socket
-from decodeChunked import decodeChunked
+#from decodeChunked import decodeChunked
 from SpdyConnection import SpdyConnection
 
 CLIENT = MongoClient('localhost', 27017)
@@ -37,15 +37,11 @@ class Cache():
             if header != None:
                 insert['header'] = header
             if body != None:
-                if insert['header'].find('chunked') != -1 and insert['header'].find('gzip') == -1:
-                    print('unchunk')
-                    body = decodeChunked(body)
-                    insert['header'] = insert['header'].replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
                 insert['body'] = body
                 if size is None:
                     insert['size'] = len(body)
 
-            #TODO get items count from the html
+            #TODO call self.countItems
 
             #check if exists
             if self.searchResource(host,path) == 0:
@@ -64,6 +60,7 @@ class Cache():
                 #revalidate resource
                 #return resource
                 print('cache hit!')
+                self.table.update({'host':host, 'path':path},{$inc:{hits:1}})
                 return result[0]
             else:
                 #resource not found
@@ -71,6 +68,10 @@ class Cache():
                 return 0
         except Exception as e:
             print(e)
+
+    def countItems(self,body):
+        #count items of the html (src and css, excluding comments)
+        pass
 
     def revalidateResource(self,host,path):
         #if cache-control is present -> validate max-age or expires
