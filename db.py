@@ -15,6 +15,8 @@ from pymongo import MongoClient
 import datetime
 import os
 import socket
+import re
+import configparser
 #from decodeChunked import decodeChunked
 from SpdyConnection import SpdyConnection
 
@@ -33,16 +35,14 @@ class Cache():
     def insertResource(self,host,path,header=None,body=None,size=None):
         try:
             #TODO check cacheable
-            insert = {'host': host,'path': path,'header':'','body':'','hits':0}
+            insert = {'host': host,'path': path,'header':'','body':'','hits':0,'items_count':0}
             if header != None:
                 insert['header'] = header
             if body != None:
                 insert['body'] = body
                 if size is None:
                     insert['size'] = len(body)
-
-            #TODO call self.countItems
-
+                insert['items_count'] = self.countItems(body)
             #check if exists
             if self.searchResource(host,path) == 0:
                 self.table.insert(insert)
@@ -60,7 +60,7 @@ class Cache():
                 #revalidate resource
                 #return resource
                 print('cache hit!')
-                self.table.update({'host':host, 'path':path},{$inc:{hits:1}})
+                self.table.update({'host':host, 'path':path},{'$inc':{hits:1}})
                 return result[0]
             else:
                 #resource not found
@@ -71,7 +71,12 @@ class Cache():
 
     def countItems(self,body):
         #count items of the html (src and css, excluding comments)
-        pass
+        try:
+            uncommented = re.sub(r"<!--(.*?)-->",'', body.decode('UTF-8','ignore'))
+            matchs = re.findall(r"src=|text/css", uncommented)
+            return len(matchs)
+        except:
+            return 0
 
     def revalidateResource(self,host,path):
         #if cache-control is present -> validate max-age or expires
@@ -79,6 +84,16 @@ class Cache():
         pass
 
     def replaceResource(self):
+        pass
+
+class DecisionTree():
+
+    def __init__(self):
+        config = configparser.ConfigParser()
+        config.read('config.ini')
+        self.constants = config['TREE CONSTANTS']
+
+    def makeChoice(self,host,path=None):
         pass
 
 class RttMeasure():
@@ -184,6 +199,5 @@ if __name__ == "__main__":
         print(guess.getMethod('www.unlu.edu.ar'))
         print(guess.getMethod('www.google.com.ar'))
         print(guess.getMethod('www.asocmedicalujan.com.ar'))
-
     except Exception as e:
         print(e)
