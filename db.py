@@ -35,7 +35,7 @@ class Cache():
     def insertResource(self,host,path,header=None,body=None,size=None):
         try:
             #TODO check cacheable
-            insert = {'host': host,'path': path,'header':'','body':'','hits':0,'items_count':0}
+            insert = {'host': host,'path': path,'header':'','body':'','hits':0,'items_count':0,'size':0}
             if header != None:
                 insert['header'] = header
             if body != None:
@@ -60,7 +60,7 @@ class Cache():
                 #revalidate resource
                 #return resource
                 print('cache hit!')
-                self.table.update({'host':host, 'path':path},{'$inc':{hits:1}})
+                self.table.update({'host':host, 'path':path},{'$inc':{'hits':1}})
                 return result[0]
             else:
                 #resource not found
@@ -86,15 +86,11 @@ class Cache():
     def replaceResource(self):
         pass
 
-class DecisionTree():
-
-    def __init__(self):
-        config = configparser.ConfigParser()
-        config.read('config.ini')
-        self.constants = config['TREE CONSTANTS']
-
-    def makeChoice(self,host,path=None):
-        pass
+    def getResource(self,host,path):
+        result = self.table.find({'host':host, 'path':path})
+        if result.count() != 0:
+            return(result[0])
+        return 0
 
 class RttMeasure():
 
@@ -109,17 +105,18 @@ class RttMeasure():
             print(e)
 
     def getLastRTT(self,host):
-        try:
-            result = DB.rtt.find({'host':host}).sort('timestamp')
-            if result.count() != 0:
-                return result[result.count()-1]['ping']
-            else:
-                rtt = self.findRTT(host)
-                if rtt != 0:
-                    self.saveRTT(host,rtt)
-                return rtt
-        except Exception as e:
-            print(e)
+        #try:
+        result = DB.rtt.find({'host':host}).sort('timestamp')
+        if result.count() != 0:
+            return result[result.count()-1]['ping']
+        else:
+            rtt = self.findRTT(host)
+            if rtt != 0:
+                self.saveRTT(host,rtt)
+            return rtt
+        #except Exception as e:
+        #    print(e)
+        return 0
 
     #return ping in ms    
     def findRTT(self,host):
@@ -176,6 +173,72 @@ class MethodGuesser():
             print('insert available methods')
             self.table.insert(guessing)
 
+class DecisionTree():
+
+    def __init__(self):
+        config = configparser.ConfigParser()
+        config.read('config.ini')
+        self.constants = config['TREE CONSTANTS']
+        self.parameters = config['PARAMETERS']
+        self.cache = Cache()
+        self.rttMeasure = RttMeasure()
+
+    def makeChoice(self,host,path='/'):
+        #size -> loss * -> # obj -> RTT -> BW -> icwnd *
+        resource = self.cache.getResource(host,path)
+        if resource:
+            size = resource['size']
+            items_count = resource['items_count']
+            rtt = self.rttMeasure.getLastRTT(host)
+            self.constants['mid_bw']
+
+            if float(size) >= float(self.constants['mid_size']):
+                if float(self.parameters['loss']) >= float(self.constants['mid_loss']):
+                    if float(items_count) >= float(self.constants['mid_itemscount']):
+                        if float(rtt) >= float(self.constants['mid_rtt']):
+                            return 'http'
+                        else:
+                            if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
+                                return 'http'
+                            else:
+                                return 0
+                    else:
+                        if float(rtt) >= float(self.constants['mid_rtt']):
+                            return 'http'
+                        else:
+                            return 0
+                else:
+                    if float(items_count) >= float(self.constants['mid_itemscount']):
+                        return 'spdy'
+                    else:
+                        if float(rtt) >= float(self.constants['mid_rtt']):
+                            if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
+                                return 0 #icwnd
+                            else:
+                                return 0
+                        else:
+                            return 0
+            else:
+                if float(self.parameters['loss']) >= float(self.constants['mid_loss']):
+                    if float(items_count) >= float(self.constants['mid_itemscount']):
+                        return 'spdy'
+                    else:
+                        if float(rtt) >= float(self.constants['mid_rtt']):
+                            if float(self.parameters['bw']) >=float(self.constants['mid_bw']):
+                                return 'spdy'
+                            else:
+                                return 0
+                        else:
+                            if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
+                                return 0 #icwnd
+                            else:
+                                return 'spdy'
+                else:
+                    return 'spdy'
+
+        else:
+            return 0
+
 if __name__ == "__main__":
     try:
         '''client = MongoClient('localhost', 27017)
@@ -199,5 +262,10 @@ if __name__ == "__main__":
         print(guess.getMethod('www.unlu.edu.ar'))
         print(guess.getMethod('www.google.com.ar'))
         print(guess.getMethod('www.asocmedicalujan.com.ar'))
+
+        decisionTree = DecisionTree()
+        choice = decisionTree.makeChoice('www.google.com')
+
+        print(choice)
     except Exception as e:
         print(e)

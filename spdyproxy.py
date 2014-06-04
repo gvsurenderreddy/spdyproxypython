@@ -21,8 +21,6 @@ STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\r\\n\\r\\n"
 BYTES = "b'(.*)'$"
 SEPARATOR = "\\r\\n\\r\\n"
 SEPARATOR = "\r\n\r\n"
-#default parameters
-BW = 10 #MegaBytes
 
 #prints color text
 def colorPrint(text,color):
