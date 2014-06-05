@@ -135,99 +135,106 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.connection.send(bytes(resource['header'],self.encoding))
         self.connection.send(resource['body'])
 
+    def formatHeaders(self,headers):
+        final_header = ''
+        for header in headers:
+            final_header += header[0]+': '+header[1]+'\r\n'
+        return final_header
+
+    def doHTTP(self):
+        (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
+        conn = http.client.HTTPConnection(netloc,80)
+        del self.headers['Proxy-Connection']
+        conn.request(self.command,urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
+        response = conn.getresponse()
+        body = response.read()
+        final_header = self.formatHeaders(response.getheaders())
+        final_header += 'Connection: close\r\n\r\n'
+        final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
+        status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
+        self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
+        conn.close()
+        #to cache
+        self.analyzeResource(netloc,path,final_header,body)
+
+    def doHTTPS(self,serverConnection,host,method,path,headers):
+        serverConnection.request(method,path)
+        response = serverConnection.getresponse()
+        body = response.read()
+        final_header = self.formatHeaders(response.getheaders())
+        final_header = final_header.replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
+        final_header += '\r\n'
+        status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
+        self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
+        #to cache
+        self.analyzeResource(host,path,final_header,body)
+
+    def doSPDY(self,serverConnection,host,method,path,headers):
+        response = serverConnection.petition(method,path)
+        if response['headers'] != None:
+            response['headers'] += 'Content-Length:'+str(len(response['data']))+'\r\n\r\n\r\n'
+            self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
+            #to cache
+            self.analyzeResource(host,path,response['headers'],response['data'])
+        else:
+            colorPrint('spdy response error','Blue')
+            #fallback to https?
+
+    def getConnection(self,protocol,host):
+        if protocol == 'https':
+            return http.client.HTTPSConnection(host,443)
+        if protocol == 'spdy':
+            return SpdyConnection((host,443))
+
     def read_write(self,protocol):
-        print(protocol)
+        colorPrint('Protocol: '+protocol,'Yellow')
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path)
         if netloc != '':
             host = netloc.split(':')[0]
         else:
             host = self.path.split(':')[0]
-        print(host)
-        count = 0
-        total_data = ''
-        #array with the petitions and the response
-        petitions_sent = []
-        #request + header + body
-        resource = {}
-        resource['request'] = ''
-        resource['header'] = ''
-        resource['body'] = ''
-        actual_response = 0
         #in http the request is previous (method do_GET)
         if protocol == 'http':
-            #(scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
-            conn = http.client.HTTPConnection(netloc,80)
-            del self.headers['Proxy-Connection']
-            conn.request(self.command,urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
-            response = conn.getresponse()
-            headers = response.getheaders()
-            body = response.read()
-            final_header = ''
-            for header in headers:
-                final_header += header[0]+': '+header[1]+'\r\n'
-            final_header += 'Connection: close\r\n\r\n'
-            final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
-            status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
-            self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
-            #to cache
-            self.analyzeResource(host,path,final_header,body)
-            conn.close()
+            self.doHTTP()
         else:
-            if protocol == 'https':
-                conn = http.client.HTTPSConnection(host,443)
-            if protocol == 'spdy':
-                spdyClient = SpdyConnection((host,443))
+            count = 0
+            total_data = ''
+            #make connection according to the method
+            serverConnection = self.getConnection(protocol,host)
             while 1:
                 count += 1
                 try:
-                    #from the client (only: client <--https--> proxy)
+                    #receive data from the client (only: client <--https--> proxy)
                     data = self.connection.recv(self.buf_len)
                     if data:
-                        total_data += data.decode(self.encoding)
+                        total_data += data.decode(self.encoding,'ignore')
                         #if the petition is complete
                         if total_data.find("\r\n\r\n") != -1:
-                            #petitions_sent.append({'request':total_data})
+                            colorPrint(total_data,'Red')
                             (method, path, version) = total_data.split('\r\n')[0].split(' ')
-
-                            #checking cache
-                            resource = self.Cache.searchResource(host,path)
-                            if resource:
-                                self.returnFromCache(resource)
+                            if method != 'GET':
+                                #TODO: send post
+                                #headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
+                                #print(headers)
+                                #serverConnection.request(method, path, total_data.split('\r\n\r\n')[1]) #headers
                             else:
-                                #parse headers:
-                                headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
-
-                                if protocol == 'https':
-                                    conn.request(method,path)
-                                    response = conn.getresponse()
-                                    headers = response.getheaders()
-                                    body = response.read()
-                                    final_header = ''
-                                    for header in headers:
-                                        final_header += header[0]+': '+header[1]+'\r\n'
-                                    final_header = final_header.replace('Transfer-Encoding: chunked','Content-Length: '+str(len(body)))
-                                    final_header += '\r\n'
-                                    status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
-                                    self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
-                                    #to cache
-                                    self.analyzeResource(host,path,final_header,body)
-
-                                if protocol == 'spdy':
-                                    response = spdyClient.petition(method,path)
-                                    spdyClient.close()
-                                    if response['headers'] != None:
-                                        response['headers'] += 'Content-Length:'+str(len(response['data']))+'\r\n\r\n\r\n'
-                                        self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
-                                        #to cache
-                                        self.analyzeResource(host,path,response['headers'],response['data'])
+                                #checking cache
+                                resource = self.Cache.searchResource(host,path)
+                                if resource:
+                                    self.returnFromCache(resource)
+                                else:
+                                    #parse headers:
+                                    headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
+                                    if protocol == 'https':
+                                        self.doHTTPS(serverConnection,host,method,path,headers)
                                     else:
-                                        colorPrint('spdy response error','Blue')
-                                        #fallback to https?
+                                        self.doSPDY(serverConnection,host,method,path,headers)
                             count = 0
                             total_data = ''
                 except Exception as e:
                     print(e)
                 if count == self.timeout:
+                    serverConnection.close()
                     break
 
 class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer):
@@ -244,7 +251,6 @@ class ThreadingHTTPServer(SocketServer.ThreadingMixIn,BaseHTTPServer.HTTPServer)
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         sys.exit('Usage: %s <address> <port> <certfile>' % os.path.basename(__file__))
-
     try:
         httpd = ThreadingHTTPServer((sys.argv[1], int(sys.argv[2])), RequestHandler, sys.argv[3])
         colorPrint('Proxy listening on '+sys.argv[1]+':'+sys.argv[2],'White')
