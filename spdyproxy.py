@@ -15,6 +15,7 @@ except:
 from SpdyConnection import SpdyConnection
 from db import Cache
 from db import RttMeasure
+from db import MethodGuesser
 
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\r\\n\\r\\n"
@@ -51,6 +52,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.timeout = 20
         self.rttMeasure = RttMeasure()
         self.Cache = Cache(20)
+        self.methodGuesser = MethodGuesser()
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -72,34 +74,23 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     do_POST = do_GET
 
     def do_CONNECT(self):
-        colorPrint(self.path,'Blue')
+        self.wfile.write(bytes(self.protocol_version+" 200 Connection established\r\n",self.encoding))
+        self.wfile.write(bytes("Proxy-agent: %s\r\n" % self.version_string(),self.encoding))
+        self.wfile.write(bytes("\r\n",self.encoding))
         try:
-            #TODO: save spdy sites. save connection in connection pool
-            spdyClient = SpdyConnection((self.path.split(':')[0],443))
-            spdyClient.close()
-            soc = 'spdy'
-            #always https (test)
-            #soc = self.connect_ssl_to(self.path)
-        except spdylay.UrlFetchError as error:
-            soc = self.connect_ssl_to(self.path)
-
-        if soc:
-            self.wfile.write(bytes(self.protocol_version+" 200 Connection established\r\n",self.encoding))
-            self.wfile.write(bytes("Proxy-agent: %s\r\n" % self.version_string(),self.encoding))
-            self.wfile.write(bytes("\r\n",self.encoding))
-            try:
-                self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.cert_file)
-            except ssl.SSLError as e:
-                logging.error(e)
-
-            if soc == 'spdy':
-                #self.read_write('spdy')
-                self.read_write('https')
+            self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.cert_file)
+        except ssl.SSLError as e:
+            print(e)
+        print(self.path.split(':')[0])
+        methods = self.methodGuesser.getMethod(self.path.split(':')[0])
+        if methods != None:
+            if methods['spdy']:
+                self.read_write('spdy')
             else:
                 self.read_write('https')
-            return
         else:
-            self.send_error(404, 'Could not connect socket')
+            self.read_write('https')
+        return
 
     def connect_ssl_to(self,netloc):
         soc = self.connect_to(netloc)
@@ -217,6 +208,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 #headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
                                 #print(headers)
                                 #serverConnection.request(method, path, total_data.split('\r\n\r\n')[1]) #headers
+                                pass
                             else:
                                 #checking cache
                                 resource = self.Cache.searchResource(host,path)

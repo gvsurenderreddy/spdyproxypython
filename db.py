@@ -259,13 +259,15 @@ if __name__ == "__main__":
         print(ping)
         '''
         guess = MethodGuesser()
-        print(guess.getMethod('www.unlu.edu.ar'))
+        methods = guess.getMethod('www.unlu.edu.ar')
+        print(methods['spdy'])
+        print(methods)
         print(guess.getMethod('www.google.com.ar'))
         print(guess.getMethod('www.asocmedicalujan.com.ar'))
 
-        decisionTree = DecisionTree()
-        choice = decisionTree.makeChoice('www.google.com')
+        #decisionTree = DecisionTree()
+        #choice = decisionTree.makeChoice('www.google.com')
 
-        print(choice)
+        #print(choice)
     except Exception as e:
         print(e)
