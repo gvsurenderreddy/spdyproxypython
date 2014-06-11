@@ -7,6 +7,7 @@ import socket
 import select
 import ssl
 import re
+import time
 import http.client
 try:
     import spdylay
@@ -114,11 +115,11 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             return 0
 
     #statistics and caching
-    def analyzeResource(self,host,path,header,body=None):
+    def analyzeResource(self,host,path,header,body=None,time=0,method=None):
         size = 0
         if body != None:
             size = len(body)
-        self.Cache.insertResource(host,path,header,body,size)
+        self.Cache.insertResource(host,path,header,body,time,method,size)
 
     #return resource from cache
     def returnFromCache(self,resource):
@@ -132,11 +133,19 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             final_header += header[0]+': '+header[1]+'\r\n'
         return final_header
 
+    def getInitialTime(self):
+        return float(time.time())
+
+    def getResponseTime(self,initialTime):
+        return int((float(time.time()) - initialTime) * 1000)
+
     def doHTTP(self):
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
         conn = http.client.HTTPConnection(netloc,80)
         del self.headers['Proxy-Connection']
+        initialTime = self.getInitialTime()
         conn.request(self.command,urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
+        totalTime = self.getResponseTime(initialTime)
         response = conn.getresponse()
         body = response.read()
         final_header = self.formatHeaders(response.getheaders())
@@ -146,10 +155,12 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
         conn.close()
         #to cache
-        self.analyzeResource(netloc,path,final_header,body)
+        self.analyzeResource(netloc,path,final_header,body,totalTime,'http')
 
     def doHTTPS(self,serverConnection,host,method,path,headers):
+        initialTime = self.getInitialTime()
         serverConnection.request(method,path)
+        totalTime = self.getResponseTime(initialTime)
         response = serverConnection.getresponse()
         body = response.read()
         final_header = self.formatHeaders(response.getheaders())
@@ -158,15 +169,17 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
         self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
         #to cache
-        self.analyzeResource(host,path,final_header,body)
+        self.analyzeResource(host,path,final_header,body,totalTime,'https')
 
     def doSPDY(self,serverConnection,host,method,path,headers):
+        initialTime = self.getInitialTime()
         response = serverConnection.petition(method,path)
+        totalTime = self.getResponseTime(initialTime)
         if response['headers'] != None:
             response['headers'] += 'Content-Length:'+str(len(response['data']))+'\r\n\r\n\r\n'
             self.connection.send(bytes(response['headers'],self.encoding)+response['data'])
             #to cache
-            self.analyzeResource(host,path,response['headers'],response['data'])
+            self.analyzeResource(host,path,response['headers'],response['data'],totalTime,'spdy')
         else:
             colorPrint('spdy response error','Blue')
             #fallback to https?
