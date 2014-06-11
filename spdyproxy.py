@@ -8,6 +8,7 @@ import select
 import ssl
 import re
 import time
+import threading
 import http.client
 try:
     import spdylay
@@ -119,7 +120,9 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         size = 0
         if body != None:
             size = len(body)
-        self.Cache.insertResource(host,path,header,body,time,method,size)
+        t = threading.Thread(target=self.Cache.insertResource, args=(host,path,header,body,time,method,size, ))  
+        t.start()
+        #self.Cache.insertResource
 
     #return resource from cache
     def returnFromCache(self,resource):
@@ -139,23 +142,22 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def getResponseTime(self,initialTime):
         return int((float(time.time()) - initialTime) * 1000)
 
-    def doHTTP(self):
-        (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
-        conn = http.client.HTTPConnection(netloc,80)
+    def doHTTP(self,serverConnection,host,method,path,headers):
+        #(scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
         del self.headers['Proxy-Connection']
         initialTime = self.getInitialTime()
-        conn.request(self.command,urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
+        serverConnection.request(method,path)#urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
         totalTime = self.getResponseTime(initialTime)
-        response = conn.getresponse()
+        response = serverConnection.getresponse()
         body = response.read()
         final_header = self.formatHeaders(response.getheaders())
         final_header += 'Connection: close\r\n\r\n'
         final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
         status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
         self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
-        conn.close()
+        serverConnection.close()
         #to cache
-        self.analyzeResource(netloc,path,final_header,body,totalTime,'http')
+        self.analyzeResource(host,path,final_header,body,totalTime,'http')
 
     def doHTTPS(self,serverConnection,host,method,path,headers):
         initialTime = self.getInitialTime()
@@ -184,7 +186,9 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             colorPrint('spdy response error','Blue')
             #fallback to https?
 
-    def getConnection(self,protocol,host):
+    def makeConnection(self,protocol,host):
+        if protocol == 'http':
+            return http.client.HTTPConnection(host,80)
         if protocol == 'https':
             return http.client.HTTPSConnection(host,443)
         if protocol == 'spdy':
@@ -199,12 +203,13 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             host = self.path.split(':')[0]
         #in http the request is previous (method do_GET)
         if protocol == 'http':
-            self.doHTTP()
+            serverConnection = self.makeConnection(protocol,netloc)
+            self.doHTTP(serverConnection,netloc,'GET',path,self.headers)
         else:
             count = 0
             total_data = ''
             #make connection according to the method
-            serverConnection = self.getConnection(protocol,host)
+            serverConnection = self.makeConnection(protocol,host)
             while 1:
                 count += 1
                 try:
@@ -234,6 +239,9 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                         self.doHTTPS(serverConnection,host,method,path,headers)
                                     else:
                                         self.doSPDY(serverConnection,host,method,path,headers)
+                                        #print(host)
+                                        #serverConnection = self.makeConnection('http',host)
+                                        #self.doHTTP(serverConnection,host,method,path,headers)
                             count = 0
                             total_data = ''
                 except Exception as e:
