@@ -18,6 +18,7 @@ from SpdyConnection import SpdyConnection
 from db import Cache
 from db import RttMeasure
 from db import MethodGuesser
+from db import DecisionTree
 
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\\\r\\\\n\\\\r\\\\n"
 STATUS_LINE = "HTTP.{4}\s\d{3}\s(.*?)\\r\\n\\r\\n"
@@ -55,6 +56,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.rttMeasure = RttMeasure()
         self.Cache = Cache(20)
         self.methodGuesser = MethodGuesser()
+        self.decisionTree = DecisionTree()
         self.__base.__init__(self, request, client_address, server)
 
     def handle(self):
@@ -83,15 +85,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.connection = ssl.SSLSocket(self.connection, server_side=True, certfile=self.cert_file)
         except ssl.SSLError as e:
             print(e)
-        print(self.path.split(':')[0])
-        methods = self.methodGuesser.getMethod(self.path.split(':')[0])
-        if methods != None:
-            if methods['spdy']:
-                self.read_write('spdy')
-            else:
-                self.read_write('https')
-        else:
-            self.read_write('https')
+        self.read_write('https')
         return
 
     def connect_ssl_to(self,netloc):
@@ -194,22 +188,41 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if protocol == 'spdy':
             return SpdyConnection((host,443))
 
-    def read_write(self,protocol):
-        colorPrint('Protocol: '+protocol,'Yellow')
+    def protocolSelection(self,host):
+        methods = self.methodGuesser.getMethod(host)
+        if methods != None:
+            if methods['spdy']:
+                return self.decisionTree.makeChoice(host)
+            if methods['http'] and methods['http']:
+                return 'http'
+        else:
+            return False
+
+    def read_write(self,client_protocol):
+        colorPrint('Client Connection Protocol: '+client_protocol,'Yellow')
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path)
         if netloc != '':
             host = netloc.split(':')[0]
         else:
             host = self.path.split(':')[0]
+
+        protocol = client_protocol
+        colorPrint(host,'Blue')
+        protocolSuggested = self.protocolSelection(host)
+        if protocolSuggested:
+            colorPrint(protocolSuggested,'Magenta')
+            protocol = protocolSuggested
+
+        #ditionary for the protocol execution
+        execution = {'http':self.doHTTP,'https':self.doHTTPS,'spdy':self.doSPDY}
+        #connection to the web server
+        serverConnection = self.makeConnection(protocol,host)
         #in http the request is previous (method do_GET)
-        if protocol == 'http':
-            serverConnection = self.makeConnection(protocol,netloc)
-            self.doHTTP(serverConnection,netloc,'GET',path,self.headers)
+        if client_protocol == 'http':
+            execution[protocol](serverConnection,host,self.command,path,self.headers)
         else:
             count = 0
             total_data = ''
-            #make connection according to the method
-            serverConnection = self.makeConnection(protocol,host)
             while 1:
                 count += 1
                 try:
@@ -235,13 +248,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 else:
                                     #parse headers:
                                     headers = re.findall(r"(?P<name>.*?): (?P<value>.*?)\r\n", total_data)
-                                    if protocol == 'https':
-                                        self.doHTTPS(serverConnection,host,method,path,headers)
-                                    else:
-                                        self.doSPDY(serverConnection,host,method,path,headers)
-                                        #print(host)
-                                        #serverConnection = self.makeConnection('http',host)
-                                        #self.doHTTP(serverConnection,host,method,path,headers)
+                                    execution[protocol](serverConnection,host,method,path,headers)
                             count = 0
                             total_data = ''
                 except Exception as e:

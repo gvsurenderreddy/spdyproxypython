@@ -201,23 +201,23 @@ class DecisionTree():
                             if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
                                 return 'http'
                             else:
-                                return 0
+                                return False
                     else:
                         if float(rtt) >= float(self.constants['mid_rtt']):
                             return 'http'
                         else:
-                            return 0
+                            return False
                 else:
                     if float(items_count) >= float(self.constants['mid_itemscount']):
                         return 'spdy'
                     else:
                         if float(rtt) >= float(self.constants['mid_rtt']):
                             if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
-                                return 0 #icwnd
+                                return False #icwnd
                             else:
-                                return 0
+                                return False
                         else:
-                            return 0
+                            return False
             else:
                 if float(self.parameters['loss']) >= float(self.constants['mid_loss']):
                     if float(items_count) >= float(self.constants['mid_itemscount']):
@@ -227,17 +227,17 @@ class DecisionTree():
                             if float(self.parameters['bw']) >=float(self.constants['mid_bw']):
                                 return 'spdy'
                             else:
-                                return 0
+                                return False
                         else:
                             if float(self.parameters['bw']) >= float(self.constants['mid_bw']):
-                                return 0 #icwnd
+                                return False #icwnd
                             else:
                                 return 'spdy'
                 else:
                     return 'spdy'
 
         else:
-            return 0
+            return False
 
 if __name__ == "__main__":
     try:
@@ -253,21 +253,18 @@ if __name__ == "__main__":
         #print(people.count())
         if people.count() != 0:
             print(people[people.count()-1]['ping'])
-            
         rttM = RttMeasure()
         ping = rttM.getLastRTT('www.google.com')
         print(ping)
-        '''
         guess = MethodGuesser()
         methods = guess.getMethod('www.unlu.edu.ar')
         print(methods['spdy'])
         print(methods)
         print(guess.getMethod('www.google.com.ar'))
         print(guess.getMethod('www.asocmedicalujan.com.ar'))
-
-        #decisionTree = DecisionTree()
-        #choice = decisionTree.makeChoice('www.google.com')
-
-        #print(choice)
+        decisionTree = DecisionTree()
+        choice = decisionTree.makeChoice('www.google.com')
+        print(choice)
+        '''
     except Exception as e:
         print(e)
