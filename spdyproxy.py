@@ -69,7 +69,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
         #checking cache
         resource = self.Cache.searchResource(netloc,path)
-        if resource:
+        #if resource:
+        if False:
             self.returnFromCache(resource)
         else:
             self.read_write('http')
@@ -137,7 +138,6 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         return int((float(time.time()) - initialTime) * 1000)
 
     def doHTTP(self,serverConnection,host,method,path,headers):
-        #(scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
         del self.headers['Proxy-Connection']
         initialTime = self.getInitialTime()
         serverConnection.request(method,path)#urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
@@ -145,8 +145,10 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         response = serverConnection.getresponse()
         body = response.read()
         final_header = self.formatHeaders(response.getheaders())
-        final_header += 'Connection: close\r\n\r\n'
         final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
+        if final_header.find('Content-Length') == -1:
+            final_header += 'Content-Length: '+str(len(body))+'\r\n'
+        final_header += 'Connection: close\r\n\r\n'
         status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
         self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
         serverConnection.close()
@@ -190,6 +192,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def protocolSelection(self,host):
         methods = self.methodGuesser.getMethod(host)
+        print(methods)
         if methods != None:
             if methods['spdy']:
                 return self.decisionTree.makeChoice(host)
@@ -213,7 +216,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             colorPrint(protocolSuggested,'Magenta')
             protocol = protocolSuggested
 
-        #ditionary for the protocol execution
+        #dictionary for the protocol execution
         execution = {'http':self.doHTTP,'https':self.doHTTPS,'spdy':self.doSPDY}
         #connection to the web server
         serverConnection = self.makeConnection(protocol,host)

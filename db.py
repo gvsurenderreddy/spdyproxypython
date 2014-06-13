@@ -262,9 +262,10 @@ if __name__ == "__main__":
         print(methods)
         print(guess.getMethod('www.google.com.ar'))
         print(guess.getMethod('www.asocmedicalujan.com.ar'))
-        decisionTree = DecisionTree()
-        choice = decisionTree.makeChoice('www.google.com')
-        print(choice)
         '''
+        decisionTree = DecisionTree()
+        choice = decisionTree.makeChoice('www.google.com.ar')
+        print(choice)
+        
     except Exception as e:
         print(e)
