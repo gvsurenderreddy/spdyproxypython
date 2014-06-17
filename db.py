@@ -28,9 +28,10 @@ def timestamp():
 
 class Cache():
 
-    def __init__(self,max_size=20):
+    def __init__(self,max_size=20,retrieve=True):
         self.table = DB.cache
         self.max_size = max_size
+        self.retrieve = retrieve
 
     def insertResource(self,host,path,header=None,body=None,time=0,method=None,size=None):
         try:
@@ -44,30 +45,34 @@ class Cache():
                     insert['size'] = len(body)
                 insert['items_count'] = self.countItems(body)
             #check if exists
-            if self.searchResource(host,path) == 0:
+            if self.searchResource(host,path,True) == 0:
                 self.table.insert(insert)
             else:
                 self.table.update({'host':host, 'path':path},insert)
         except Exception as e:
             print(e)
 
-    def searchResource(self,host,path):
-        print('searching... '+host+path)
-        try:
-            result = self.table.find({'host':host, 'path':path})
-            if result.count() != 0:
-                #check freshness
-                #revalidate resource
-                #return resource
-                print('cache hit!')
-                self.table.update({'host':host, 'path':path},{'$inc':{'hits':1}})
-                return result[0]
-            else:
-                #resource not found
-                print('cache miss')
-                return 0
-        except Exception as e:
-            print(e)
+    def searchResource(self,host,path,retrieve=None):
+        if retrieve == None:
+            retrieve = self.retrieve
+        if retrieve:
+            print('searching... '+host+path)
+            try:
+                result = self.table.find({'host':host, 'path':path})
+                if result.count() != 0:
+                    #check freshness
+                    #revalidate resource
+                    #return resource
+                    self.table.update({'host':host, 'path':path},{'$inc':{'hits':1}})
+                    return result[0]
+                else:
+                    #resource not found
+                    print('cache miss')
+                    return False
+            except Exception as e:
+                print(e)
+        else:
+            return False
 
     def countItems(self,body):
         #count items of the html (src and css, excluding comments)
@@ -139,6 +144,16 @@ class MethodGuesser():
         if result.count() != 0:
             return result[0]
 
+    def multipleGuessing(self,path):
+        #try:
+        f = open(path,'r')
+        for line in f:
+            url = 'www.%s' % line.rstrip()
+            guessing = self.guesser(url)
+            print('%s;%d;%d;%d' % (url,guessing['http'],guessing['https'],guessing['spdy']))
+        f.close()
+        #except Exception as e:
+        #    print("couldn't open file")
     def guesser(self,host):
         guessing = {'host':host,'http':0,'https':0,'spdy':0}
         #trying http...
@@ -170,8 +185,9 @@ class MethodGuesser():
         if result.count() != 0:
             self.table.update(search,guessing)
         else:
-            print('insert available methods')
+            #print('insert available methods')
             self.table.insert(guessing)
+        return guessing
 
 class DecisionTree():
 
@@ -256,16 +272,19 @@ if __name__ == "__main__":
         rttM = RttMeasure()
         ping = rttM.getLastRTT('www.google.com')
         print(ping)
-        guess = MethodGuesser()
-        methods = guess.getMethod('www.unlu.edu.ar')
-        print(methods['spdy'])
-        print(methods)
-        print(guess.getMethod('www.google.com.ar'))
-        print(guess.getMethod('www.asocmedicalujan.com.ar'))
         '''
-        decisionTree = DecisionTree()
-        choice = decisionTree.makeChoice('www.google.com.ar')
-        print(choice)
+        guess = MethodGuesser()
+        #guess.guesser('www.baidu.com')
+        #methods = guess.getMethod('www.baidu.com')
+        #print(methods['spdy'])
+        #print(methods)
+        #print(guess.getMethod('www.google.com.ar'))
+        #print(guess.getMethod('www.asocmedicalujan.com.ar'))
         
+        #decisionTree = DecisionTree()
+        #choice = decisionTree.makeChoice('www.google.com.ar')
+        #print(choice)
+        guess.multipleGuessing('../alexatop/500.txt')
+
     except Exception as e:
         print(e)

@@ -54,7 +54,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.buf_len = 8192
         self.timeout = 20
         self.rttMeasure = RttMeasure()
-        self.Cache = Cache(20)
+        self.Cache = Cache(20,False)
         self.methodGuesser = MethodGuesser()
         self.decisionTree = DecisionTree()
         self.__base.__init__(self, request, client_address, server)
@@ -70,7 +70,8 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         #checking cache
         resource = self.Cache.searchResource(netloc,path)
         #if resource:
-        if False:
+        if resource:
+            print('cache hit!')
             self.returnFromCache(resource)
         else:
             self.read_write('http')
@@ -211,10 +212,10 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
         protocol = client_protocol
         colorPrint(host,'Blue')
-        protocolSuggested = self.protocolSelection(host)
-        if protocolSuggested:
-            colorPrint(protocolSuggested,'Magenta')
-            protocol = protocolSuggested
+        #protocolSuggested = self.protocolSelection(host)
+        #if protocolSuggested:
+        #    colorPrint(protocolSuggested,'Magenta')
+        #    protocol = protocolSuggested
 
         #dictionary for the protocol execution
         execution = {'http':self.doHTTP,'https':self.doHTTPS,'spdy':self.doSPDY}
@@ -247,6 +248,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 #checking cache
                                 resource = self.Cache.searchResource(host,path)
                                 if resource:
+                                    print('cache hit!')
                                     self.returnFromCache(resource)
                                 else:
                                     #parse headers:
