@@ -141,20 +141,23 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def doHTTP(self,serverConnection,host,method,path,headers):
         del self.headers['Proxy-Connection']
         initialTime = self.getInitialTime()
-        serverConnection.request(method,path)#urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
-        totalTime = self.getResponseTime(initialTime)
-        response = serverConnection.getresponse()
-        body = response.read()
-        final_header = self.formatHeaders(response.getheaders())
-        final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
-        if final_header.find('Content-Length') == -1:
-            final_header += 'Content-Length: '+str(len(body))+'\r\n'
-        final_header += 'Connection: close\r\n\r\n'
-        status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
-        self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
-        serverConnection.close()
-        #to cache
-        self.analyzeResource(host,path,final_header,body,totalTime,'http')
+        try:
+            serverConnection.request(method,path)#urlparse.urlunparse(('', '', path,params,query,'')),params,self.headers) #method, path, params, headers
+            totalTime = self.getResponseTime(initialTime)
+            response = serverConnection.getresponse()
+            body = response.read()
+            final_header = self.formatHeaders(response.getheaders())
+            final_header = final_header.replace('Transfer-Encoding: chunked\r\n','')
+            if final_header.find('Content-Length') == -1:
+                final_header += 'Content-Length: '+str(len(body))+'\r\n'
+            final_header += 'Connection: close\r\n\r\n'
+            status = 'HTTP/1.'+str(response.version-10)+' '+str(response.status)+' '+response.reason+'\r\n'
+            self.connection.send(bytes(status,self.encoding)+bytes(final_header,self.encoding)+body)
+            serverConnection.close()
+            #to cache
+            self.analyzeResource(host,path,final_header,body,totalTime,'http')
+        except Exception as e:
+            self.send_error(404, 'Could not connect socket')
 
     def doHTTPS(self,serverConnection,host,method,path,headers):
         initialTime = self.getInitialTime()
@@ -185,7 +188,7 @@ class RequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     def makeConnection(self,protocol,host):
         if protocol == 'http':
-            return http.client.HTTPConnection(host,80)
+            return http.client.HTTPConnection(host,80,20)
         if protocol == 'https':
             return http.client.HTTPSConnection(host,443)
         if protocol == 'spdy':
